@@ -1,0 +1,665 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#07080c">
+<title>Narutto AfriQa Bot</title>
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="icon" href="icon-192.png">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+:root{
+  --bg:#07080c; --panel:#10121a; --panel2:#161923; --line:#232838;
+  --text:#f2f4f8; --mute:#8b93a7; --red:#ff2d3a; --red2:#b3121c;
+  --green:#22c55e; --amber:#f5a524;
+}
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+html,body{margin:0;height:100%;background:var(--bg);color:var(--text);
+  font-family:system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;overscroll-behavior:none}
+body{background:
+  radial-gradient(900px 500px at 50% -10%,rgba(255,45,58,.18),transparent 60%),
+  radial-gradient(600px 400px at 100% 100%,rgba(255,45,58,.08),transparent 60%),var(--bg)}
+#app{max-width:480px;margin:0 auto;height:100dvh;display:flex;flex-direction:column}
+main{flex:1;overflow-y:auto;padding:16px 16px 24px;padding-top:max(16px,env(safe-area-inset-top))}
+.view{display:none}.view.on{display:block}
+h1,h2,h3{margin:0}
+.top{display:flex;align-items:center;gap:10px;margin-bottom:14px}
+.top img{width:30px;height:30px;border-radius:50%}
+.top h2{font-size:20px;font-weight:800;flex:1}
+.avatar{width:150px;height:150px;border-radius:50%;display:block;margin:6px auto 0;
+  box-shadow:0 0 0 3px var(--red),0 0 40px rgba(255,45,58,.55)}
+.avatar.sm{width:84px;height:84px;box-shadow:0 0 0 2px var(--red),0 0 24px rgba(255,45,58,.5)}
+.title{text-align:center;font-size:30px;font-weight:900;letter-spacing:.5px;margin-top:18px}
+.tag{text-align:center;color:#c9cfdd;font-size:14px;margin:6px 24px 0}
+.row3{display:flex;align-items:center;justify-content:center;gap:10px;margin:22px 0 10px;
+  background:rgba(16,18,26,.85);border:1px solid var(--line);border-radius:44px;padding:12px 14px}
+.row3 .side{flex:1;display:flex;flex-direction:column;align-items:center;gap:6px;background:none;border:0;
+  color:var(--text);font-weight:700;font-size:12px;letter-spacing:1px;padding:8px 0}
+.row3 .side svg{width:22px;height:22px;stroke:var(--red)}
+.start{width:96px;height:96px;border-radius:50%;border:0;color:#fff;font-weight:800;font-size:13px;letter-spacing:1px;
+  background:radial-gradient(circle at 50% 35%,#ff4651,var(--red2));
+  box-shadow:0 0 0 6px rgba(255,45,58,.18),0 0 34px rgba(255,45,58,.6);display:flex;flex-direction:column;
+  align-items:center;justify-content:center;gap:4px}
+.start.on{background:radial-gradient(circle at 50% 35%,#34d57a,#12803f);box-shadow:0 0 0 6px rgba(34,197,94,.18),0 0 34px rgba(34,197,94,.55)}
+.start svg{width:30px;height:30px;fill:#fff}
+.pill{display:inline-flex;align-items:center;gap:6px;background:var(--panel);border:1px solid var(--line);
+  border-radius:20px;padding:6px 12px;font-size:12px;color:var(--mute)}
+.pill i{width:8px;height:8px;border-radius:50%;background:var(--red);display:inline-block}
+.pill.ok i{background:var(--green)}
+.center{text-align:center}
+.sect{color:var(--mute);font-size:15px;margin:22px 4px 10px;display:flex;align-items:center;gap:8px}
+.item{display:flex;align-items:center;gap:12px;background:rgba(16,18,26,.85);border:1px solid var(--line);
+  border-radius:30px;padding:10px 14px;margin-bottom:10px;font-weight:800}
+.item img{width:34px;height:34px;border-radius:50%}
+.item .x{margin-left:auto;width:32px;height:32px;border-radius:50%;border:1px solid var(--red2);
+  background:rgba(255,45,58,.12);color:var(--red);font-size:16px}
+.btn{border:0;border-radius:12px;padding:13px 16px;font-weight:800;font-size:15px;color:#fff;background:var(--red);width:100%}
+.btn.grey{background:#262b3a}.btn.green{background:var(--green);color:#04210f}
+.btn:disabled{opacity:.55}
+.btn.sm{padding:11px 14px;font-size:14px;width:auto}
+.card{background:var(--panel);border:1px solid var(--line);border-radius:18px;padding:16px}
+.drop{border:2px dashed #2c3247;border-radius:20px;padding:20px 14px;text-align:center;background:rgba(16,18,26,.7)}
+.drop small{display:block;color:var(--mute);letter-spacing:2px;font-size:11px;margin-top:12px}
+.drop b{display:block;font-size:17px;margin-top:4px}
+.drop p{margin:4px 0 14px;color:var(--mute);font-size:13px}
+.btns{display:flex;gap:10px;justify-content:center}
+.thumbs{display:flex;gap:8px;overflow-x:auto;margin:12px 0}
+.thumbs div{position:relative;flex:0 0 auto}
+.thumbs img{height:150px;border-radius:12px;border:1px solid var(--line);display:block}
+.thumbs button{position:absolute;top:4px;right:4px;width:24px;height:24px;border-radius:50%;border:0;background:rgba(0,0,0,.7);color:#fff}
+.thumbs span{position:absolute;left:6px;bottom:6px;font-size:11px;background:rgba(0,0,0,.7);padding:2px 6px;border-radius:8px}
+.addtf{display:flex;justify-content:center;gap:8px;align-items:center;width:100%;padding:12px;border:1px solid var(--line);
+  border-radius:12px;background:rgba(16,18,26,.7);color:var(--mute);font-size:13px;margin:10px 0 12px}
+.addtf em{font-style:normal;font-size:10px;background:#222737;border-radius:6px;padding:2px 6px}
+.scan{position:relative;height:200px;border-radius:16px;overflow:hidden;background:#0c0e15;border:1px solid var(--line);
+  display:flex;align-items:center;justify-content:center}
+.scan img{height:100%;opacity:.6}
+.scan:before,.scan:after{content:"";position:absolute;width:26px;height:26px;border:3px solid var(--red)}
+.scan:before{left:10px;top:10px;border-right:0;border-bottom:0}
+.scan:after{right:10px;bottom:10px;border-left:0;border-top:0}
+.scan .line{position:absolute;left:0;right:0;height:3px;background:var(--red);box-shadow:0 0 14px var(--red);animation:sweep 1.6s ease-in-out infinite}
+@keyframes sweep{0%{top:4%}50%{top:94%}100%{top:4%}}
+.dots{display:flex;gap:6px;justify-content:center;margin-top:10px}
+.dots i{width:6px;height:6px;border-radius:50%;background:var(--red);animation:blink 1s infinite}
+.dots i:nth-child(2){animation-delay:.15s}.dots i:nth-child(3){animation-delay:.3s}.dots i:nth-child(4){animation-delay:.45s}
+@keyframes blink{50%{opacity:.2}}
+.pulse{animation:pulse 1.6s ease-in-out infinite}
+@keyframes pulse{50%{transform:scale(1.05)}}
+.sig{margin-top:14px;background:linear-gradient(180deg,#141722,#0e1018);border:1px solid var(--line);border-radius:20px;padding:16px}
+.sig .h{display:flex;align-items:center;gap:10px}
+.sig .h img{width:40px;height:40px;border-radius:50%}
+.sig .h b{display:block;font-size:14px}.sig .h small{color:var(--mute);font-size:12px}
+.dir{margin-left:auto;font-weight:800;font-size:13px;border-radius:10px;padding:8px 12px;border:1px solid}
+.dir.buy{color:var(--green);border-color:#1b5a36;background:rgba(34,197,94,.1)}
+.dir.sell{color:var(--red);border-color:#6a1a20;background:rgba(255,45,58,.1)}
+.dir.wait{color:var(--amber);border-color:#6a4d12;background:rgba(245,165,36,.1)}
+.sym{display:flex;align-items:center;gap:10px;margin:16px 0 12px}
+.sym h3{font-size:26px;font-weight:900}
+.chip{font-size:12px;color:var(--mute);background:#222737;border-radius:8px;padding:4px 8px}
+.risk{margin-left:auto;font-size:12px;font-weight:800;border-radius:10px;padding:6px 10px;border:1px solid}
+.risk.LOW{color:var(--green);border-color:#1b5a36}.risk.MEDIUM{color:var(--amber);border-color:#6a4d12}.risk.HIGH{color:var(--red);border-color:#6a1a20}
+.tiles{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}
+.tile{background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:14px;padding:12px 4px;text-align:center}
+.tile small{display:block;font-size:9px;letter-spacing:1.5px;color:var(--mute);margin-bottom:8px}
+.tile b{font-size:17px}.tile.tp b{color:var(--green)}.tile.sl b{color:var(--red)}
+.conf{display:flex;align-items:center;gap:10px;margin:14px 0;background:rgba(255,255,255,.03);border:1px solid var(--line);border-radius:12px;padding:10px 12px;font-size:12px;color:var(--mute)}
+.conf .bar{flex:1;height:5px;background:#2a2f40;border-radius:4px;overflow:hidden}
+.conf .bar i{display:block;height:100%;background:linear-gradient(90deg,var(--amber),#ffcf6b)}
+.why{font-size:13px;color:#c9cfdd;line-height:1.5;margin:10px 0}
+.why li{margin-bottom:4px}
+.meta{font-size:12px;color:var(--mute);margin:6px 0}
+.res{margin-top:10px;text-align:center;font-size:13px;color:var(--mute);border:1px solid var(--line);border-radius:12px;padding:10px}
+.res.ok{color:var(--green);border-color:#1b5a36}.res.err{color:var(--red);border-color:#6a1a20}
+details.json{margin-top:10px}details.json summary{color:var(--mute);font-size:12px}
+pre{white-space:pre-wrap;word-break:break-word;background:#0b0d13;border:1px solid var(--line);border-radius:10px;padding:10px;font-size:11px;color:#b9c0d4}
+.hist{border-left:4px solid var(--green);background:var(--panel);border-radius:14px;padding:12px;margin-bottom:10px}
+.hist.SELL{border-left-color:var(--red)}
+.hist .r1{display:flex;gap:8px;align-items:center;font-weight:800}
+.hist .r1 em{font-style:normal;font-size:11px;padding:2px 8px;border-radius:6px;background:#222737}
+.hist .r1 small{margin-left:auto;color:var(--mute);font-weight:400}
+.hist .r2{display:flex;justify-content:space-between;font-size:12px;color:var(--mute);margin:8px 0}
+.hist .r2 b{color:var(--text)}
+.hist img{height:90px;border-radius:8px;display:block;margin:6px 0}
+.hist .del{background:none;border:0;color:var(--red);font-size:12px;float:right}
+.acct{display:grid;grid-template-columns:repeat(3,1fr);gap:8px;margin-top:14px}
+.acct div{background:var(--panel);border:1px solid var(--line);border-radius:14px;padding:10px 6px;text-align:center}
+.acct small{display:block;font-size:9px;letter-spacing:1.2px;color:var(--mute);margin-bottom:6px}.acct b{font-size:16px}
+.pos{background:var(--panel);border:1px solid var(--line);border-left:4px solid var(--green);border-radius:14px;padding:12px;margin-bottom:10px}
+.pos.SELL{border-left-color:var(--red)}
+.pos .p1{display:flex;align-items:center;gap:8px;font-weight:800}.pos .p1 em{font-style:normal;font-size:11px;padding:2px 8px;border-radius:6px;background:#222737}
+.pos .pl{margin-left:auto;font-size:20px;font-weight:900}
+.up{color:var(--green)}.dn{color:var(--red)}
+.pos .p2{display:flex;justify-content:space-between;font-size:12px;color:var(--mute);margin:8px 0 6px}.pos .p2 b{color:var(--text)}
+.track{position:relative;height:8px;border-radius:5px;background:linear-gradient(90deg,#7a1b22,#2a2f40 50%,#17613a)}
+.track i{position:absolute;top:-4px;width:4px;height:16px;border-radius:2px;background:#fff;transform:translateX(-2px);box-shadow:0 0 8px #fff}
+.track span{position:absolute;top:14px;font-size:10px;color:var(--mute)}
+.badge{font-size:11px;font-weight:800;border-radius:8px;padding:3px 9px;border:1px solid}
+.badge.win{color:var(--green);border-color:#1b5a36;background:rgba(34,197,94,.12)}.badge.loss{color:var(--red);border-color:#6a1a20;background:rgba(255,45,58,.12)}
+.disc{font-size:11px;color:var(--mute);text-align:center;margin:14px 6px 0}
+label{display:block;font-size:12px;color:var(--mute);margin:14px 0 6px}
+input,select{width:100%;background:#0c0e15;color:var(--text);border:1px solid var(--line);border-radius:10px;padding:12px;font-size:15px}
+.pairs{display:flex;flex-wrap:wrap;gap:8px}
+.pairs button{background:#161923;border:1px solid var(--line);color:var(--mute);border-radius:20px;padding:8px 14px;font-weight:700}
+.pairs button.on{color:#fff;border-color:var(--red);background:rgba(255,45,58,.15)}
+.log{font-family:ui-monospace,Menlo,monospace;font-size:11px;color:#b9c0d4;border-bottom:1px solid #1a1e2b;padding:6px 0}
+.log time{color:var(--mute);margin-right:6px}
+nav{display:flex;background:rgba(10,11,16,.96);border-top:1px solid var(--line);padding-bottom:env(safe-area-inset-bottom)}
+nav button{flex:1;background:none;border:0;color:var(--mute);padding:10px 0 8px;font-size:11px;font-weight:700;display:flex;flex-direction:column;align-items:center;gap:4px}
+nav button svg{width:22px;height:22px;stroke:currentColor;fill:none;stroke-width:1.8}
+nav button.on{color:var(--red)}
+.sheet{position:fixed;inset:0;background:rgba(0,0,0,.65);display:none;align-items:flex-end;justify-content:center;z-index:9}
+.sheet.on{display:flex}
+.sheet .in{width:100%;max-width:480px;background:var(--panel);border-radius:22px 22px 0 0;padding:20px 16px calc(20px + env(safe-area-inset-bottom))}
+.toast{position:fixed;left:50%;bottom:90px;transform:translateX(-50%);background:#222737;border:1px solid var(--line);padding:10px 16px;border-radius:20px;font-size:13px;display:none;z-index:10;max-width:90%}
+.toast.on{display:block}
+.hide{display:none!important}
+</style>
+</head>
+<body>
+<div id="app">
+<main>
+
+<!-- HOME -->
+<section class="view on" id="v-home">
+  <div class="top"><span class="pill" id="bridgePill"><i></i><span id="bridgeTxt">Bridge offline</span></span></div>
+  <img class="avatar" src="icon-512.png" alt="">
+  <h1 class="title">NARUTTO AFRIQA</h1>
+  <p class="tag">intelligent, disciplined, and precise SMC trading AI</p>
+  <div class="row3">
+    <button class="side" id="btnPairs"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M3 17l6-6 4 4 8-8M15 7h6v6"/></svg>PAIRS</button>
+    <button class="start" id="btnStart"><svg viewBox="0 0 24 24"><path d="M8 5v14l11-7z"/></svg><span id="startTxt">START</span></button>
+    <button class="side" id="btnLogs"><svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round"><path d="M3 12a9 9 0 1 0 3-6.7L3 8M3 3v5h5M12 7v5l3 2"/></svg>LOGS</button>
+  </div>
+  <div class="center"><span class="pill">Bridge: MT5 Expert Advisor</span></div>
+  <div class="sect">Robot List</div>
+  <div class="item"><img src="icon-192.png" alt=""><span>NARUTTO AFRIQA</span><button class="x" aria-label="remove" id="btnRemoveBot">&times;</button></div>
+  <div class="item" style="color:var(--mute)"><span style="color:var(--red);font-size:20px">&#8853;</span><span style="color:var(--text)">Add New Trading Bot</span></div>
+  <div id="pairsBox" class="card hide"><div class="sect" style="margin-top:0">Pairs</div><div class="pairs" id="pairsList"></div></div>
+  <div id="logsBox" class="card hide" style="margin-top:10px"><div class="sect" style="margin-top:0">Logs</div><div id="logsList"></div></div>
+</section>
+
+<!-- METATRADER -->
+<section class="view" id="v-mt">
+  <div class="top"><img src="icon-192.png" alt=""><h2>Metatrader</h2></div>
+  <div class="card">
+    <label style="margin-top:0">Bridge URL</label>
+    <input id="bridgeUrl" placeholder="https://your-bridge.example.com" autocapitalize="off" autocorrect="off">
+    <label>Bridge token</label>
+    <input id="bridgeToken" type="password" placeholder="same token as the EA" autocapitalize="off">
+    <div style="display:flex;gap:10px;margin-top:14px">
+      <button class="btn grey sm" id="btnSaveBridge" style="flex:1">Save</button>
+      <button class="btn sm" id="btnTestBridge" style="flex:1">Test connection</button>
+    </div>
+    <div class="res" id="bridgeRes">Not tested</div>
+  </div>
+  <div class="acct" id="acct"><div><small>BALANCE</small><b id="aBal">-</b></div><div><small>EQUITY</small><b id="aEq">-</b></div><div><small>FLOATING P/L</small><b id="aFl">-</b></div></div>
+  <div class="sect">Running trades <span class="chip" id="runCount">0</span></div>
+  <div id="runList"></div>
+  <div class="sect">Closed trades <span class="chip" id="closedCount">0</span></div>
+  <div id="closedList"></div>
+  <div class="sect">Orders sent from this app</div>
+  <div id="tradesList"></div>
+  <button class="btn grey sm" id="btnReloadTrades" style="width:100%">Refresh</button>
+</section>
+
+<!-- SCANNER -->
+<section class="view" id="v-scan">
+  <div class="top"><img src="icon-192.png" alt=""><h2>Scanner</h2></div>
+
+  <div id="stateIdle">
+    <div class="drop">
+      <img class="avatar sm" src="icon-512.png" alt="">
+      <small>NARUTTO AFRIQA</small>
+      <b>Ready to Scan</b>
+      <p>Upload a chart screenshot or take a photo</p>
+      <div class="btns">
+        <button class="btn sm" id="btnChoose">&#8682; Choose Image</button>
+        <button class="btn grey sm" id="btnPhoto">&#9737; Take Photo</button>
+      </div>
+    </div>
+    <div class="thumbs" id="thumbs"></div>
+    <button class="addtf hide" id="btnAddTf">+ Add More Timeframes <em>Optional</em></button>
+    <button class="btn hide" id="btnAnalyze">&#9678; Analyze Chart</button>
+  </div>
+
+  <div id="stateBusy" class="hide">
+    <div class="scan"><img id="busyImg" alt=""><div class="line"></div></div>
+    <div class="center">
+      <img class="avatar sm pulse" src="icon-512.png" alt="" style="margin-top:22px">
+      <small style="color:var(--mute);letter-spacing:2px;font-size:11px;display:block;margin-top:14px">NARUTTO AFRIQA</small>
+      <b style="font-size:17px;display:block;margin-top:4px">Analyzing chart...</b>
+      <p style="color:var(--mute);font-size:13px;margin:4px 0">AI is scanning structure, liquidity and levels</p>
+      <div class="dots"><i></i><i></i><i></i><i></i></div>
+    </div>
+  </div>
+
+  <div id="result"></div>
+  <p class="disc">Not financial advice. AI can be wrong. Demo first, small lots.</p>
+
+  <div class="sect" id="histHead" style="cursor:pointer">&#9201; <b style="color:var(--text)">Scan History</b> <span class="chip" id="histCount">0</span></div>
+  <div id="histList"></div>
+  <button class="btn grey sm hide" id="btnClearHist" style="width:100%">Clear All History</button>
+</section>
+
+<!-- SETTINGS -->
+<section class="view" id="v-set">
+  <div class="top"><img src="icon-192.png" alt=""><h2>Settings</h2></div>
+  <div class="card">
+    <label style="margin-top:0">Anthropic API key</label>
+    <input id="apiKey" type="password" placeholder="sk-ant-..." autocapitalize="off" autocorrect="off">
+    <label>Model</label>
+    <input id="model" placeholder="claude-sonnet-5-5" autocapitalize="off">
+    <label>Default lot size</label>
+    <input id="lots" type="number" step="0.01" min="0.01" inputmode="decimal">
+    <label>Extra instructions for the AI (optional)</label>
+    <input id="extra" placeholder="e.g. prefer London/NY sessions">
+    <button class="btn" id="btnSaveSet" style="margin-top:16px">Save settings</button>
+    <p class="meta">Your key and settings stay on this phone only (browser storage). Use a key with a spending limit.</p>
+  </div>
+</section>
+
+</main>
+
+<nav>
+  <button data-tab="home" class="on"><svg viewBox="0 0 24 24"><path d="M3 11l9-8 9 8v9a1 1 0 0 1-1 1h-5v-6H9v6H4a1 1 0 0 1-1-1z"/></svg>Home</button>
+  <button data-tab="mt"><svg viewBox="0 0 24 24"><rect x="3" y="4" width="18" height="6" rx="2"/><rect x="3" y="14" width="18" height="6" rx="2"/></svg>Metatrader</button>
+  <button data-tab="scan"><svg viewBox="0 0 24 24"><path d="M4 8V5a1 1 0 0 1 1-1h3M16 4h3a1 1 0 0 1 1 1v3M20 16v3a1 1 0 0 1-1 1h-3M8 20H5a1 1 0 0 1-1-1v-3M7 12h10"/></svg>Scanner</button>
+  <button data-tab="set"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.2l2-1.5-2-3.4-2.3.9a7 7 0 0 0-2-1.2L14 3h-4l-.6 2.6a7 7 0 0 0-2 1.2l-2.3-.9-2 3.4 2 1.5a7 7 0 0 0 0 2.4l-2 1.5 2 3.4 2.3-.9a7 7 0 0 0 2 1.2L10 21h4l.6-2.6a7 7 0 0 0 2-1.2l2.3.9 2-3.4-2-1.5c.1-.4.1-.8.1-1.2z"/></svg>Settings</button>
+</nav>
+</div>
+
+<input type="file" id="fileChoose" accept="image/*" multiple class="hide">
+<input type="file" id="filePhoto" accept="image/*" capture="environment" class="hide">
+
+<div class="sheet" id="sheet"><div class="in">
+  <h3 id="shTitle">Confirm trade</h3>
+  <p class="meta" id="shInfo"></p>
+  <label>Lot size</label>
+  <input id="shLots" type="number" step="0.01" min="0.01" inputmode="decimal">
+  <div style="display:flex;gap:10px;margin-top:16px">
+    <button class="btn grey" id="shCancel" style="flex:1">Cancel</button>
+    <button class="btn green" id="shGo" style="flex:1">Place Trade</button>
+  </div>
+</div></div>
+<div class="toast" id="toast"></div>
+
+<script>
+"use strict";
+(function(){
+var $ = function(id){ return document.getElementById(id); };
+var BOT = "NARUTTO AFRIQA";
+var DEFAULT_PAIRS = ["XAUUSD","BTCUSD","EURUSD","GBPUSD","USDJPY","NAS100","US30"];
+
+/* ---------- storage ---------- */
+function load(k, d){ try { var v = localStorage.getItem(k); return v ? JSON.parse(v) : d; } catch(e){ return d; } }
+function save(k, v){ try { localStorage.setItem(k, JSON.stringify(v)); } catch(e){ toast("Storage full or blocked"); } }
+
+var S = load("nb_settings", {});
+S.key = S.key || ""; S.model = S.model || "claude-sonnet-5-5"; S.lots = S.lots || 0.01;
+S.bridge = S.bridge || ""; S.token = S.token || ""; S.extra = S.extra || "";
+S.pairs = S.pairs || ["XAUUSD","BTCUSD"];
+var hist = load("nb_hist", []);
+var logs = load("nb_logs", []);
+var images = [];       // {b64, thumb}
+var current = null;    // current signal object
+var armed = false, beat = null;
+
+/* ---------- helpers ---------- */
+function esc(s){ var d = document.createElement("div"); d.textContent = String(s == null ? "" : s); return d.innerHTML; }
+function toast(m){ var t = $("toast"); t.textContent = m; t.className = "toast on"; setTimeout(function(){ t.className = "toast"; }, 2600); }
+function log(m){ logs.unshift({t: Date.now(), m: m}); logs = logs.slice(0, 80); save("nb_logs", logs); renderLogs(); }
+function ago(ts){ var s = Math.floor((Date.now()-ts)/1000); if (s<60) return "just now"; if (s<3600) return Math.floor(s/60)+"m ago"; if (s<86400) return Math.floor(s/3600)+"h ago"; return Math.floor(s/86400)+"d ago"; }
+function fmt(n){ var x = Number(n); if (!isFinite(x)) return "-"; return String(+x.toFixed(x > 1000 ? 2 : 5)); }
+
+/* ---------- tabs ---------- */
+function tab(name){
+  document.querySelectorAll(".view").forEach(function(v){ v.classList.toggle("on", v.id === "v-"+name); });
+  document.querySelectorAll("nav button").forEach(function(b){ b.classList.toggle("on", b.dataset.tab === name); });
+  stopPosTimer(); if (name === "mt"){ loadTrades(); startPosTimer(); }
+  if (name === "scan") renderHist();
+}
+document.querySelectorAll("nav button").forEach(function(b){ b.onclick = function(){ tab(b.dataset.tab); }; });
+
+/* ---------- home ---------- */
+function renderPairs(){
+  var box = $("pairsList"); box.innerHTML = "";
+  DEFAULT_PAIRS.forEach(function(p){
+    var b = document.createElement("button"); b.textContent = p;
+    if (S.pairs.indexOf(p) >= 0) b.className = "on";
+    b.onclick = function(){
+      var i = S.pairs.indexOf(p); if (i >= 0) S.pairs.splice(i,1); else S.pairs.push(p);
+      save("nb_settings", S); renderPairs();
+    };
+    box.appendChild(b);
+  });
+}
+function renderLogs(){
+  var box = $("logsList"); if (!box) return;
+  box.innerHTML = logs.length ? "" : '<div class="meta">No activity yet.</div>';
+  logs.slice(0, 40).forEach(function(l){
+    var d = document.createElement("div"); d.className = "log";
+    d.innerHTML = "<time>" + new Date(l.t).toLocaleTimeString() + "</time>" + esc(l.m);
+    box.appendChild(d);
+  });
+}
+$("btnPairs").onclick = function(){ $("pairsBox").classList.toggle("hide"); $("logsBox").classList.add("hide"); };
+$("btnLogs").onclick = function(){ $("logsBox").classList.toggle("hide"); $("pairsBox").classList.add("hide"); renderLogs(); };
+$("btnRemoveBot").onclick = function(){ toast("This is the only bot installed"); };
+
+function setBridgeUI(ok, txt){
+  $("bridgePill").className = "pill" + (ok ? " ok" : "");
+  $("bridgeTxt").textContent = txt;
+}
+function bridgeReq(path, opts){
+  if (!S.bridge || !S.token) return Promise.reject(new Error("Set bridge URL and token in Metatrader tab"));
+  opts = opts || {};
+  opts.headers = Object.assign({"X-Token": S.token}, opts.headers || {});
+  return fetch(S.bridge.replace(/\/+$/,"") + path, opts).then(function(r){
+    return r.json().then(function(j){ if (!r.ok) throw new Error(j.error || ("HTTP " + r.status)); return j; });
+  });
+}
+function ping(){
+  bridgeReq("/trades").then(function(){ setBridgeUI(true, "Bridge online"); })
+    .catch(function(e){ setBridgeUI(false, "Bridge offline"); });
+}
+$("btnStart").onclick = function(){
+  armed = !armed;
+  $("btnStart").classList.toggle("on", armed);
+  $("startTxt").textContent = armed ? "STOP" : "START";
+  if (armed){ log("Bot started"); ping(); beat = setInterval(ping, 10000); }
+  else { log("Bot stopped"); clearInterval(beat); setBridgeUI(false, "Bridge offline"); }
+};
+
+/* ---------- metatrader ---------- */
+$("bridgeUrl").value = S.bridge; $("bridgeToken").value = S.token;
+$("btnSaveBridge").onclick = function(){
+  S.bridge = $("bridgeUrl").value.trim(); S.token = $("bridgeToken").value.trim();
+  save("nb_settings", S); toast("Saved");
+};
+$("btnTestBridge").onclick = function(){
+  S.bridge = $("bridgeUrl").value.trim(); S.token = $("bridgeToken").value.trim(); save("nb_settings", S);
+  var r = $("bridgeRes"); r.className = "res"; r.textContent = "Testing...";
+  bridgeReq("/trades").then(function(){ r.className = "res ok"; r.textContent = "Connected to bridge"; setBridgeUI(true,"Bridge online"); })
+    .catch(function(e){ r.className = "res err"; r.textContent = String(e.message || e); });
+};
+function loadTrades(){
+  var box = $("tradesList");
+  if (!S.bridge || !S.token){ box.innerHTML = '<div class="meta">Set the bridge first.</div>'; return; }
+  bridgeReq("/trades").then(function(list){
+    box.innerHTML = list.length ? "" : '<div class="meta">No trades yet.</div>';
+    list.slice(0, 15).forEach(function(t){
+      var d = document.createElement("div"); d.className = "hist " + t.side;
+      d.innerHTML = '<div class="r1">' + esc(t.symbol) + ' <em>' + esc(t.side) + '</em><small>' + esc(t.status) + '</small></div>' +
+        '<div class="r2"><span>Entry <b>' + fmt(t.entry) + '</b></span><span>TP <b>' + fmt(t.tp) + '</b></span><span>SL <b>' + fmt(t.sl) + '</b></span></div>' +
+        '<div class="meta">' + esc(t.lots) + ' lots' + (t.ticket ? ' &middot; #' + esc(t.ticket) : '') + (t.msg ? ' &middot; ' + esc(t.msg) : '') + '</div>';
+      box.appendChild(d);
+    });
+  }).catch(function(e){ box.innerHTML = '<div class="meta">' + esc(e.message || e) + '</div>'; });
+}
+$("btnReloadTrades").onclick = loadTrades;
+
+
+/* ---------- running / closed trades ---------- */
+var posTimer = null;
+function money(n, cur){ var x = Number(n) || 0; return (x > 0 ? "+" : x < 0 ? "-" : "") + Math.abs(x).toFixed(2) + (cur ? " " + cur : ""); }
+function cls(n){ return n > 0 ? "up" : n < 0 ? "dn" : ""; }
+function loadPositions(){
+  if (!S.bridge || !S.token) return;
+  bridgeReq("/positions").then(function(a){
+    var cur = a.currency || "";
+    $("aBal").textContent = a.balance ? a.balance.toFixed(2) : "-";
+    $("aEq").textContent = a.equity ? a.equity.toFixed(2) : "-";
+    var fl = (a.open || []).reduce(function(t, p){ return t + (p.profit || 0); }, 0);
+    $("aFl").textContent = money(fl); $("aFl").className = cls(fl);
+    $("runCount").textContent = (a.open || []).length; $("closedCount").textContent = (a.closed || []).length;
+    var rb = $("runList"); rb.innerHTML = (a.open || []).length ? "" : '<div class="meta">No running trades.</div>';
+    (a.open || []).forEach(function(p){
+      var lo = Math.min(p.sl, p.tp), hi = Math.max(p.sl, p.tp);
+      var pct = Math.max(0, Math.min(100, (p.price - lo) / (hi - lo) * 100)); if (p.side === "SELL") pct = 100 - pct;
+      var d = document.createElement("div"); d.className = "pos " + p.side;
+      d.innerHTML = '<div class="p1">' + esc(p.symbol) + ' <em>' + esc(p.side) + '</em><span class="chip">' + esc(p.lots) + ' lots</span><span class="pl ' + cls(p.profit) + '">' + money(p.profit) + '</span></div>' +
+        '<div class="p2"><span>Open <b>' + fmt(p.open) + '</b></span><span>Now <b>' + fmt(p.price) + '</b></span><span>TP <b>' + fmt(p.tp) + '</b></span><span>SL <b>' + fmt(p.sl) + '</b></span></div>' +
+        '<div class="track"><i style="left:' + pct + '%"></i><span style="left:0">SL</span><span style="right:0">TP</span></div><div style="height:14px"></div>';
+      rb.appendChild(d);
+    });
+    var cb = $("closedList"); cb.innerHTML = (a.closed || []).length ? "" : '<div class="meta">No closed trades yet.</div>';
+    (a.closed || []).forEach(function(p){
+      var win = p.profit >= 0, d = document.createElement("div"); d.className = "pos " + p.side; d.style.borderLeftColor = win ? "var(--green)" : "var(--red)";
+      d.innerHTML = '<div class="p1">' + esc(p.symbol) + ' <em>' + esc(p.side) + '</em><span class="badge ' + (win ? "win" : "loss") + '">' + (win ? "WIN" : "LOSS") + ' &middot; ' + esc(p.reason) + '</span><span class="pl ' + cls(p.profit) + '">' + money(p.profit) + '</span></div>' +
+        '<div class="meta">' + esc(p.lots) + ' lots &middot; closed at ' + fmt(p.price) + ' &middot; ' + esc(p.time) + '</div>';
+      cb.appendChild(d);
+    });
+  }).catch(function(){});
+}
+function startPosTimer(){ stopPosTimer(); loadPositions(); posTimer = setInterval(loadPositions, 2000); }
+function stopPosTimer(){ if (posTimer){ clearInterval(posTimer); posTimer = null; } }
+
+/* ---------- settings ---------- */
+$("apiKey").value = S.key; $("model").value = S.model; $("lots").value = S.lots; $("extra").value = S.extra;
+$("btnSaveSet").onclick = function(){
+  S.key = $("apiKey").value.trim(); S.model = $("model").value.trim() || "claude-sonnet-5-5";
+  var l = parseFloat($("lots").value); S.lots = (l > 0 && l <= 100) ? l : 0.01;
+  S.extra = $("extra").value.trim().slice(0, 300);
+  save("nb_settings", S); toast("Settings saved");
+};
+
+/* ---------- images ---------- */
+function downscale(file, maxEdge, q){
+  return new Promise(function(resolve, reject){
+    var url = URL.createObjectURL(file), img = new Image();
+    img.onload = function(){
+      var sc = Math.min(1, maxEdge / Math.max(img.width, img.height));
+      var c = document.createElement("canvas"); c.width = Math.round(img.width*sc); c.height = Math.round(img.height*sc);
+      c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+      var full = c.toDataURL("image/jpeg", q);
+      var ts = 140 / c.height, t = document.createElement("canvas");
+      t.width = Math.round(c.width*ts); t.height = 140; t.getContext("2d").drawImage(c, 0, 0, t.width, t.height);
+      URL.revokeObjectURL(url);
+      resolve({ b64: full.split(",")[1], preview: full, thumb: t.toDataURL("image/jpeg", 0.6) });
+    };
+    img.onerror = function(){ URL.revokeObjectURL(url); reject(new Error("Could not read image")); };
+    img.src = url;
+  });
+}
+function addFiles(files){
+  var arr = Array.prototype.slice.call(files).slice(0, 4 - images.length);
+  Promise.all(arr.map(function(f){ return downscale(f, 1568, 0.85); })).then(function(res){
+    images = images.concat(res).slice(0, 4); renderThumbs();
+  }).catch(function(e){ toast(e.message); });
+}
+function renderThumbs(){
+  var box = $("thumbs"); box.innerHTML = "";
+  images.forEach(function(im, i){
+    var d = document.createElement("div");
+    d.innerHTML = '<img src="' + im.preview + '" alt=""><button aria-label="remove">&times;</button><span>' + (i === 0 ? "Entry TF" : "Context " + i) + '</span>';
+    d.querySelector("button").onclick = function(){ images.splice(i,1); renderThumbs(); };
+    box.appendChild(d);
+  });
+  $("btnAnalyze").classList.toggle("hide", !images.length);
+  $("btnAddTf").classList.toggle("hide", !images.length || images.length >= 4);
+}
+$("btnChoose").onclick = function(){ $("fileChoose").click(); };
+$("btnPhoto").onclick = function(){ $("filePhoto").click(); };
+$("btnAddTf").onclick = function(){ $("fileChoose").click(); };
+$("fileChoose").onchange = function(e){ addFiles(e.target.files); e.target.value = ""; };
+$("filePhoto").onchange = function(e){ addFiles(e.target.files); e.target.value = ""; };
+
+/* ---------- AI analysis ---------- */
+var SYSTEM = [
+"You are Narutto AfriQa, a disciplined Smart Money Concepts (SMC) chart analyst.",
+"You receive one or more trading chart screenshots. Image 1 is the entry timeframe. Any further images are context timeframes (usually higher).",
+"Method: 1) higher-timeframe bias, 2) market structure (BOS, CHoCH), 3) liquidity (equal highs/lows, sweeps), 4) points of interest (order block, FVG, supply/demand, flip level), 5) require confirmation before an entry, 6) entry from the POI, stop beyond the invalidation swing, target at the next liquidity pool.",
+"STRICT RULES:",
+"- Read the symbol, timeframe and every price ONLY from what is visible in the screenshot (header text and price axis). Never invent or guess levels. Interpolate between axis labels carefully.",
+"- If the chart is unreadable, prices cannot be read, or there is no clean setup, answer signal WAIT with the reason in warnings.",
+"- Minimum reward:risk is 1.5. BUY needs sl < entry < tp. SELL needs tp < entry < sl.",
+"- confidence is 0-100 and must reflect real uncertainty. Do not exceed 85.",
+"Reply with ONE JSON object and nothing else, using exactly these keys:",
+'{"signal":"BUY|SELL|WAIT","symbol":"","timeframe":"","entry":0,"sl":0,"tp":0,"rr":0,"confidence":0,"risk":"LOW|MEDIUM|HIGH","bias":"bullish|bearish|range","structure":"","poi":"","liquidity":"","reasons":[""],"invalidation":"","warnings":[]}'
+].join("\n");
+
+function extractJson(text){
+  var a = text.indexOf("{"), b = text.lastIndexOf("}");
+  if (a < 0 || b <= a) throw new Error("AI did not return JSON");
+  return JSON.parse(text.slice(a, b+1));
+}
+function validate(j){
+  var out = {
+    signal: String(j.signal || "WAIT").toUpperCase(), symbol: String(j.symbol || "").toUpperCase().replace(/[^A-Z0-9._]/g,""),
+    timeframe: String(j.timeframe || "").toUpperCase(), entry: Number(j.entry), sl: Number(j.sl), tp: Number(j.tp),
+    confidence: Math.max(0, Math.min(100, Number(j.confidence) || 0)), risk: String(j.risk || "MEDIUM").toUpperCase(),
+    bias: String(j.bias || ""), structure: String(j.structure || ""), poi: String(j.poi || ""), liquidity: String(j.liquidity || ""),
+    reasons: Array.isArray(j.reasons) ? j.reasons.map(String).slice(0,6) : [], invalidation: String(j.invalidation || ""),
+    warnings: Array.isArray(j.warnings) ? j.warnings.map(String).slice(0,6) : []
+  };
+  if (["LOW","MEDIUM","HIGH"].indexOf(out.risk) < 0) out.risk = "MEDIUM";
+  if (out.signal !== "BUY" && out.signal !== "SELL") out.signal = "WAIT";
+  if (out.signal !== "WAIT"){
+    var nums = [out.entry, out.sl, out.tp].every(function(n){ return isFinite(n) && n > 0; });
+    var side = out.signal === "BUY" ? (out.sl < out.entry && out.entry < out.tp) : (out.tp < out.entry && out.entry < out.sl);
+    if (!nums || !side){ out.warnings.push("Levels failed sanity check - downgraded to WAIT"); out.signal = "WAIT"; }
+    else {
+      out.rr = Math.abs(out.tp - out.entry) / Math.abs(out.entry - out.sl);
+      if (out.rr < 1.5){ out.warnings.push("Reward:risk " + out.rr.toFixed(2) + " is below 1.5 - downgraded to WAIT"); out.signal = "WAIT"; }
+    }
+  }
+  if (!out.symbol) out.signal = "WAIT";
+  return out;
+}
+
+function analyze(){
+  if (!S.key){ toast("Add your API key in Settings"); tab("set"); return; }
+  if (!images.length) return;
+  $("stateIdle").classList.add("hide"); $("stateBusy").classList.remove("hide");
+  $("busyImg").src = images[0].preview; $("result").innerHTML = "";
+  var content = [];
+  images.forEach(function(im, i){
+    content.push({type:"text", text: i === 0 ? "Image 1 - entry timeframe:" : "Image " + (i+1) + " - context timeframe:"});
+    content.push({type:"image", source:{type:"base64", media_type:"image/jpeg", data: im.b64}});
+  });
+  content.push({type:"text", text: "Analyze and return the JSON. Allowed symbols: " + (S.pairs.join(", ") || "any") + "." + (S.extra ? " User note: " + S.extra : "")});
+  log("Scan started (" + images.length + " image" + (images.length > 1 ? "s" : "") + ")");
+  fetch("https://api.anthropic.com/v1/messages", {
+    method: "POST",
+    headers: {"content-type":"application/json","x-api-key":S.key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
+    body: JSON.stringify({model:S.model, max_tokens:1500, temperature:0.2, system:SYSTEM, messages:[{role:"user", content:content}]})
+  }).then(function(r){ return r.json().then(function(j){ if (!r.ok) throw new Error((j.error && j.error.message) || ("HTTP " + r.status)); return j; }); })
+  .then(function(j){
+    var text = (j.content || []).map(function(c){ return c.text || ""; }).join("");
+    var sig = validate(extractJson(text)); sig.raw = text; sig.ts = Date.now(); sig.thumb = images[0].thumb; sig.id = "s" + sig.ts;
+    current = sig; log("Signal: " + sig.signal + " " + sig.symbol + " " + sig.timeframe);
+    if (S.pairs.length && sig.symbol && S.pairs.indexOf(sig.symbol) < 0) sig.warnings.push(sig.symbol + " is not in your enabled pairs");
+    hist.unshift({id:sig.id, ts:sig.ts, signal:sig.signal, symbol:sig.symbol, timeframe:sig.timeframe, entry:sig.entry, sl:sig.sl, tp:sig.tp, thumb:sig.thumb});
+    hist = hist.slice(0, 50); save("nb_hist", hist);
+    $("stateBusy").classList.add("hide"); $("stateIdle").classList.remove("hide");
+    renderResult(sig); renderHist();
+  }).catch(function(e){
+    log("Scan failed: " + (e.message || e));
+    $("stateBusy").classList.add("hide"); $("stateIdle").classList.remove("hide");
+    $("result").innerHTML = '<div class="res err">' + esc(e.message || e) + '</div>';
+  });
+}
+$("btnAnalyze").onclick = analyze;
+
+function renderResult(s){
+  var box = $("result"), isWait = s.signal === "WAIT";
+  var h = '<div class="sig"><div class="h"><img src="icon-192.png" alt=""><div><b>' + BOT + ' <span style="color:var(--green)">&#9679;</span></b><small>Signal generated just now</small></div>' +
+    '<span class="dir ' + s.signal.toLowerCase() + '">' + (isWait ? "WAIT" : (s.signal === "BUY" ? "&#8599; BUY" : "&#8600; SELL")) + '</span></div>' +
+    '<div class="sym"><h3>' + esc(s.symbol || "?") + '</h3><span class="chip">' + esc(s.timeframe || "-") + '</span><span class="risk ' + s.risk + '">' + s.risk + '</span></div>';
+  if (!isWait){
+    h += '<div class="tiles"><div class="tile"><small>ENTRY</small><b>' + fmt(s.entry) + '</b></div>' +
+      '<div class="tile tp"><small>TAKE PROFIT</small><b>' + fmt(s.tp) + '</b></div>' +
+      '<div class="tile sl"><small>STOP LOSS</small><b>' + fmt(s.sl) + '</b></div></div>';
+  }
+  h += '<div class="conf"><span>Confidence</span><div class="bar"><i style="width:' + s.confidence + '%"></i></div><span>' + s.confidence + '%</span></div>';
+  if (!isWait) h += '<div class="meta">Reward:Risk ' + s.rr.toFixed(2) + ' &middot; Bias ' + esc(s.bias) + '</div>';
+  if (s.structure) h += '<div class="meta"><b>Structure:</b> ' + esc(s.structure) + '</div>';
+  if (s.poi) h += '<div class="meta"><b>POI:</b> ' + esc(s.poi) + '</div>';
+  if (s.liquidity) h += '<div class="meta"><b>Liquidity:</b> ' + esc(s.liquidity) + '</div>';
+  if (s.reasons.length) h += '<ul class="why">' + s.reasons.map(function(r){ return "<li>" + esc(r) + "</li>"; }).join("") + '</ul>';
+  if (s.invalidation) h += '<div class="meta"><b>Invalidation:</b> ' + esc(s.invalidation) + '</div>';
+  if (s.warnings.length) h += '<div class="meta" style="color:var(--amber)">&#9888; ' + s.warnings.map(esc).join(" &middot; ") + '</div>';
+  if (!isWait) h += '<button class="btn green" id="btnTake">&#8599; Take Trade</button><div id="tradeRes"></div>';
+  h += '<details class="json"><summary>View JSON</summary><pre id="jsonOut"></pre><button class="btn grey sm" id="btnCopyJson">Copy JSON</button></details></div>';
+  box.innerHTML = h;
+  var pretty = JSON.stringify({signal:s.signal,symbol:s.symbol,timeframe:s.timeframe,entry:s.entry,sl:s.sl,tp:s.tp,rr:s.rr||0,confidence:s.confidence,risk:s.risk,bias:s.bias,structure:s.structure,poi:s.poi,liquidity:s.liquidity,reasons:s.reasons,invalidation:s.invalidation,warnings:s.warnings}, null, 2);
+  $("jsonOut").textContent = pretty;
+  $("btnCopyJson").onclick = function(){ copy(pretty); };
+  if (!isWait) $("btnTake").onclick = function(){ openSheet(s); };
+}
+function copy(t){
+  if (navigator.clipboard && navigator.clipboard.writeText){ navigator.clipboard.writeText(t).then(function(){ toast("Copied"); }, function(){ toast("Copy blocked"); }); }
+  else toast("Copy not supported");
+}
+
+/* ---------- take trade ---------- */
+var sheetSig = null;
+function openSheet(s){
+  sheetSig = s; $("shLots").value = S.lots;
+  $("shInfo").textContent = s.signal + " " + s.symbol + "  |  Entry " + fmt(s.entry) + "  TP " + fmt(s.tp) + "  SL " + fmt(s.sl);
+  $("sheet").classList.add("on");
+}
+$("shCancel").onclick = function(){ $("sheet").classList.remove("on"); };
+$("shGo").onclick = function(){
+  var lots = parseFloat($("shLots").value);
+  if (!(lots > 0 && lots <= 100)){ toast("Enter a valid lot size"); return; }
+  $("sheet").classList.remove("on");
+  placeTrade(sheetSig, lots);
+};
+function placeTrade(s, lots){
+  var btn = $("btnTake"), res = $("tradeRes");
+  if (!S.bridge || !S.token){
+    var t = s.signal + " " + s.symbol + " " + lots + " lots\nEntry " + s.entry + "\nTP " + s.tp + "\nSL " + s.sl;
+    copy(t); res.innerHTML = '<div class="res">No bridge set - order ticket copied. Place it manually in MT5.</div>'; return;
+  }
+  btn.disabled = true; btn.textContent = "Placing Trade...";
+  bridgeReq("/signal", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({symbol:s.symbol, side:s.signal, entry:s.entry, sl:s.sl, tp:s.tp, lots:lots})})
+  .then(function(r){ log("Queued " + s.signal + " " + s.symbol + " (" + r.id + ")"); return waitFill(r.id, 0); })
+  .then(function(t){
+    if (t.status === "filled"){
+      btn.textContent = "✓ Trade Placed"; res.innerHTML = '<div class="res ok">Trade placed (' + lots + ' lots) #' + esc(t.ticket) + '</div>';
+      log("Filled " + s.symbol + " #" + t.ticket);
+    } else { throw new Error(t.msg || t.status); }
+  }).catch(function(e){
+    btn.disabled = false; btn.textContent = "Take Trade";
+    res.innerHTML = '<div class="res err">' + esc(e.message || e) + '</div>'; log("Trade failed: " + (e.message || e));
+  });
+}
+function waitFill(id, n){
+  return new Promise(function(resolve, reject){
+    (function tick(i){
+      bridgeReq("/signal/" + id).then(function(t){
+        if (t.status === "filled" || t.status === "failed" || t.status === "expired") return resolve(t);
+        if (i > 80) return reject(new Error("Timed out waiting for MT5"));
+        setTimeout(function(){ tick(i+1); }, 1500);
+      }).catch(reject);
+    })(n);
+  });
+}
+
+/* ---------- history ---------- */
+function renderHist(){
+  $("histCount").textContent = hist.length;
+  var box = $("histList"); box.innerHTML = "";
+  hist.forEach(function(h){
+    var d = document.createElement("div"); d.className = "hist " + h.signal;
+    d.innerHTML = '<div class="r1">' + esc(h.symbol) + ' <em>' + esc(h.signal) + '</em><small>' + ago(h.ts) + '</small></div>' +
+      (h.signal !== "WAIT" ? '<div class="r2"><span>Entry <b>' + fmt(h.entry) + '</b></span><span>TP <b>' + fmt(h.tp) + '</b></span><span>SL <b>' + fmt(h.sl) + '</b></span></div>' : '') +
+      (h.thumb ? '<img src="' + h.thumb + '" alt="">' : '') + '<button class="del">Delete</button><div style="clear:both"></div>';
+    d.querySelector(".del").onclick = function(){ hist = hist.filter(function(x){ return x.id !== h.id; }); save("nb_hist", hist); renderHist(); };
+    box.appendChild(d);
+  });
+  $("btnClearHist").classList.toggle("hide", !hist.length);
+}
+$("btnClearHist").onclick = function(){ if (confirm("Clear all scan history?")){ hist = []; save("nb_hist", hist); renderHist(); } };
+
+/* ---------- init ---------- */
+renderPairs(); renderLogs(); renderHist();
+if ("serviceWorker" in navigator && location.protocol !== "file:"){ navigator.serviceWorker.register("sw.js").catch(function(){}); }
+window.__nb = {loadPositions: loadPositions, validate: validate, extractJson: extractJson};
+})();
+</script>
+</body>
+</html>
