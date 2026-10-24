@@ -1,0 +1,8 @@
+{
+  "name": "narutto-bridge",
+  "version": "1.0.0",
+  "description": "Signal bridge between the Narutto bot app and the MT5 EA",
+  "main": "server.js",
+  "scripts": { "start": "node server.js" },
+  "engines": { "node": ">=18" }
+}
