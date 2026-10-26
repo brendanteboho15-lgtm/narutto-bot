@@ -582,7 +582,7 @@ function analyze(){
   fetch("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: {"content-type":"application/json","x-api-key":S.key,"anthropic-version":"2023-06-01","anthropic-dangerous-direct-browser-access":"true"},
-    body: JSON.stringify({model:S.model, max_tokens:1500, temperature:0.2, system:SYSTEM, messages:[{role:"user", content:content}]})
+    body: JSON.stringify({model:S.model, max_tokens:1500, system:SYSTEM, messages:[{role:"user", content:content}]})
   }).then(function(r){ return r.json().then(function(j){ if (!r.ok) throw new Error((j.error && j.error.message) || ("HTTP " + r.status)); return j; }); })
   .then(function(j){
     var text = (j.content || []).map(function(c){ return c.text || ""; }).join("");
