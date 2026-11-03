@@ -210,6 +210,17 @@ nav button.on{color:var(--accent)}
     </div>
     <div class="res" id="bridgeRes">Not tested</div>
   </div>
+  <div class="sect">Auto-Trade <span class="chip" id="autoChip">OFF</span></div>
+  <div class="card" id="autoCard">
+    <div class="meta" id="autoInfo" style="margin-top:0">Save the bridge URL and token first.</div>
+    <div style="display:flex;gap:10px;margin-top:12px">
+      <button class="btn sm" id="btnAutoOn" style="flex:1">Turn ON</button>
+      <button class="btn grey sm" id="btnAutoOff" style="flex:1;border:1px solid var(--red2);color:var(--red)">STOP</button>
+    </div>
+    <div class="meta" style="margin-top:12px">Auto decisions (newest first)</div>
+    <div id="autoLog"><div class="meta">Nothing yet.</div></div>
+    <div class="meta">Not financial advice. AI can be wrong. Use a demo account first.</div>
+  </div>
   <div class="acct" id="acct"><div><small>BALANCE</small><b id="aBal">-</b></div><div><small>EQUITY</small><b id="aEq">-</b></div><div><small>FLOATING P/L</small><b id="aFl">-</b></div></div>
   <div class="sect">Running trades <span class="chip" id="runCount">0</span></div>
   <div id="runList"></div>
@@ -479,7 +490,40 @@ function loadPositions(){
     });
   }).catch(function(){});
 }
-function startPosTimer(){ stopPosTimer(); loadPositions(); posTimer = setInterval(loadPositions, 2000); }
+/* ---------- auto-trade panel ---------- */
+function autoPost(body){
+  return bridgeReq("/auto", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+}
+function renderAuto(a){
+  var on = !!a.enabled, L = a.limits || {}, d = a.day || {};
+  var chip = $("autoChip"); chip.textContent = on ? "ON" : "OFF"; chip.style.color = on ? "var(--green)" : "var(--mute)";
+  var warn = "";
+  if (!a.hasKey) warn = "Server has no ANTHROPIC_API_KEY yet (add it on Render).";
+  else if (a.eaAgeSec == null || a.eaAgeSec > 90) warn = "EA is not sending data. Check MT5 is open and the EA is attached.";
+  else if (d.halted) warn = d.halted;
+  $("autoInfo").innerHTML = '<b style="color:var(--text)">' + (on ? "Auto is ON" : "Auto is OFF") + '</b> &middot; ' + esc(a.mode) + ' mode &middot; ' + esc((a.symbols || []).join(", ")) +
+    '<br>Risk ' + esc(L.riskPct) + '% per trade &middot; max ' + esc(L.maxOpen) + ' open &middot; max ' + esc(L.maxTradesDay) + ' per day &middot; stops at -' + esc(L.dailyLossPct) + '% for the day' +
+    '<br>Today: ' + esc(d.scans) + ' scans &middot; ' + esc(d.trades) + ' trades &middot; day P/L ' + esc((-d.lossPct || 0).toFixed(2)) + '%' +
+    (warn ? '<br><span style="color:var(--amber)">' + esc(warn) + '</span>' : "");
+  var box = $("autoLog"); box.innerHTML = (a.log || []).length ? "" : '<div class="meta">Nothing yet.</div>';
+  (a.log || []).forEach(function(e){
+    var col = e.result === "TRADE" || e.result === "ON" ? "var(--green)" : e.result === "ERROR" || e.result === "STOP" ? "var(--red)" : "var(--mute)";
+    var d2 = document.createElement("div"); d2.className = "meta";
+    d2.innerHTML = '<b style="color:' + col + '">' + esc(e.result) + '</b> ' + esc(e.symbol) + ' &middot; ' + esc(ago(e.t)) + '<br>' + esc(e.msg);
+    box.appendChild(d2);
+  });
+}
+function loadAuto(){ if (!S.bridge || !S.token) return; bridgeReq("/auto").then(renderAuto).catch(function(e){ $("autoInfo").textContent = "Could not reach the bridge: " + (e.message || e); }); }
+$("btnAutoOn").onclick = function(){
+  if (!confirm("Turn ON auto-trade?\n\nThe bot will place real orders on the MT5 account the EA is attached to, by itself, using the risk limits shown. Use a DEMO account first.")) return;
+  autoPost({ enabled: 1 }).then(function(a){ renderAuto(a); toast("Auto-trade ON"); log("Auto-trade ON"); }).catch(function(e){ toast(e.message || e); });
+};
+$("btnAutoOff").onclick = function(){
+  autoPost({ panic: 1 }).then(function(a){ renderAuto(a); toast("Auto-trade STOPPED"); log("Auto-trade STOPPED"); }).catch(function(e){ toast(e.message || e); });
+};
+
+var posTick = 0;
+function startPosTimer(){ stopPosTimer(); loadPositions(); loadAuto(); posTick = 0; posTimer = setInterval(function(){ loadPositions(); if (++posTick % 3 === 0) loadAuto(); }, 2000); }
 function stopPosTimer(){ if (posTimer){ clearInterval(posTimer); posTimer = null; } }
 
 /* ---------- settings ---------- */

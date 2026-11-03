@@ -4,7 +4,7 @@
 //| L99 standard: ASCII only, handle-free, no chart object clutter   |
 //+------------------------------------------------------------------+
 #property copyright "Narutto AfriQa Bot"
-#property version   "1.00"
+#property version   "1.10"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -19,10 +19,17 @@ input double InpMaxDriftPoints  = 500.0;     // Max distance from signal entry i
 input double InpMaxLots         = 1.0;       // Hard lot cap
 input int    InpSlippagePoints  = 30;        // Max slippage in points
 input bool   InpAllowTrading    = true;      // Master switch
+input bool   InpAutoScan        = true;      // Send candles to the bridge for AI auto-trading
+input int    InpBarsM5          = 80;        // Candles sent: M5
+input int    InpBarsM15         = 60;        // Candles sent: M15
+input int    InpBarsH1          = 60;        // Candles sent: H1
+input int    InpBarsH4          = 40;        // Candles sent: H4
+input int    InpMaxPositions    = 3;         // Hard cap on open positions with this magic (0 = no cap)
 
 CTrade g_trade;
 string g_handled[];
 int    g_failStreak = 0;
+datetime g_lastBar  = 0;
 
 //+------------------------------------------------------------------+
 bool WasHandled(const string id)
@@ -101,10 +108,26 @@ void Report(const string id, const bool ok, const ulong ticket, const double pri
 }
 
 //+------------------------------------------------------------------+
+int CountMyPositions()
+{
+   int n = 0;
+   int total = PositionsTotal();
+   for(int i = 0; i < total; i++)
+   {
+      ulong tk = PositionGetTicket(i);
+      if(tk == 0)
+         continue;
+      if(PositionGetInteger(POSITION_MAGIC) == InpMagic)
+         n++;
+   }
+   return(n);
+}
+
+//+------------------------------------------------------------------+
 //| Validate and execute a signal                                    |
 //+------------------------------------------------------------------+
 bool Execute(const string sym, const string side, const double entry, const double sl,
-             const double tp, const double lotsIn, ulong &ticket, double &fill, string &msg)
+             const double tp, const double lotsIn, const double riskPct, ulong &ticket, double &fill, string &msg)
 {
    ticket = 0;
    fill   = 0.0;
@@ -117,6 +140,11 @@ bool Execute(const string sym, const string side, const double entry, const doub
    if(!SymbolSelect(sym, true))
    {
       msg = "Symbol not found: " + sym;
+      return(false);
+   }
+   if(InpMaxPositions > 0 && CountMyPositions() >= InpMaxPositions)
+   {
+      msg = "EA position cap reached (" + IntegerToString(InpMaxPositions) + ")";
       return(false);
    }
 
@@ -178,12 +206,35 @@ bool Execute(const string sym, const string side, const double entry, const doub
    double stepLot = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
    if(stepLot <= 0.0)
       stepLot = 0.01;
-   double lots = MathMin(lotsIn, InpMaxLots);
+   double want = lotsIn;
+   if(want <= 0.0 && riskPct > 0.0)
+   {
+      double tickSize = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
+      double tickVal  = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_VALUE);
+      if(tickSize <= 0.0 || tickVal <= 0.0)
+      {
+         msg = "No tick value for risk sizing";
+         return(false);
+      }
+      double lossPerLot = MathAbs(price - sl) / tickSize * tickVal;
+      if(lossPerLot <= 0.0)
+      {
+         msg = "Bad stop distance for risk sizing";
+         return(false);
+      }
+      want = AccountInfoDouble(ACCOUNT_BALANCE) * riskPct / 100.0 / lossPerLot;
+   }
+   if(want <= 0.0)
+   {
+      msg = "No lot size";
+      return(false);
+   }
+   double lots = MathMin(want, InpMaxLots);
    lots = MathMin(lots, maxLot);
    lots = MathFloor(lots / stepLot + 0.0000001) * stepLot;
    if(lots < minLot)
    {
-      msg = "Lot below broker minimum " + DoubleToString(minLot, 2);
+      msg = "Lot below broker minimum " + DoubleToString(minLot, 2) + " (risk too small for this account)";
       return(false);
    }
    lots = NormalizeDouble(lots, 2);
@@ -282,6 +333,59 @@ void SendPositions()
 }
 
 //+------------------------------------------------------------------+
+//| Closed candles, oldest first: "MM.DD HH:MI|o|h|l|c;..."          |
+//+------------------------------------------------------------------+
+string Candles(const string sym, const ENUM_TIMEFRAMES tf, const int count)
+{
+   MqlRates r[];
+   ArraySetAsSeries(r, false);
+   int got = CopyRates(sym, tf, 1, count, r);
+   if(got <= 0)
+      return("");
+   int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+   string out = "";
+   for(int i = 0; i < got; i++)
+   {
+      string t = StringSubstr(TimeToString(r[i].time, TIME_DATE | TIME_MINUTES), 5);
+      if(i > 0)
+         out += ";";
+      out += t + "|" + DoubleToString(r[i].open, digits) + "|" + DoubleToString(r[i].high, digits)
+           + "|" + DoubleToString(r[i].low, digits) + "|" + DoubleToString(r[i].close, digits);
+   }
+   return(out);
+}
+
+void SendCandles()
+{
+   string sym = _Symbol;
+   MqlTick tick;
+   if(!SymbolInfoTick(sym, tick) || tick.bid <= 0.0 || tick.ask <= 0.0)
+      return;
+   MqlRates last[];
+   if(CopyRates(sym, PERIOD_M5, 1, 1, last) != 1)
+      return;
+   int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+
+   string base = sym;
+   int ls = StringLen(InpSymbolSuffix);
+   if(ls > 0 && StringLen(sym) > ls && StringSubstr(sym, StringLen(sym) - ls) == InpSymbolSuffix)
+      base = StringSubstr(sym, 0, StringLen(sym) - ls);
+
+   string body = "symbol=" + UrlEncode(base)
+               + "&bid=" + DoubleToString(tick.bid, digits)
+               + "&ask=" + DoubleToString(tick.ask, digits)
+               + "&age=" + IntegerToString((long)(TimeCurrent() - last[0].time))
+               + "&c5=" + UrlEncode(Candles(sym, PERIOD_M5, InpBarsM5))
+               + "&c15=" + UrlEncode(Candles(sym, PERIOD_M15, InpBarsM15))
+               + "&c60=" + UrlEncode(Candles(sym, PERIOD_H1, InpBarsH1))
+               + "&c240=" + UrlEncode(Candles(sym, PERIOD_H4, InpBarsH4));
+   string resp;
+   int code = Http("POST", "/candles", body, resp);
+   if(code != 200)
+      Print("Narutto: candles upload failed (", code, ") ", resp);
+}
+
+//+------------------------------------------------------------------+
 void Poll()
 {
    string resp;
@@ -293,7 +397,7 @@ void Poll()
       return;
    }
    g_failStreak = 0;
-   Comment("Narutto Bridge: ONLINE  trading=", (InpAllowTrading ? "ON" : "OFF"));
+   Comment("Narutto Bridge: ONLINE  trading=", (InpAllowTrading ? "ON" : "OFF"), "  candles=", (InpAutoScan ? "ON" : "OFF"));
 
    StringTrimLeft(resp);
    StringTrimRight(resp);
@@ -304,7 +408,8 @@ void Poll()
    }
 
    string p[];
-   if(StringSplit(resp, '|', p) != 7)
+   int np = StringSplit(resp, '|', p);
+   if(np != 7 && np != 8)
    {
       Print("Narutto: malformed signal: ", resp);
       return;
@@ -321,11 +426,12 @@ void Poll()
    double sl    = StringToDouble(p[4]);
    double tp    = StringToDouble(p[5]);
    double lots  = StringToDouble(p[6]);
+   double riskP = (np == 8) ? StringToDouble(p[7]) : 0.0;
 
    ulong  ticket;
    double fill;
    string msg;
-   bool ok = Execute(sym, side, entry, sl, tp, lots, ticket, fill, msg);
+   bool ok = Execute(sym, side, entry, sl, tp, lots, riskP, ticket, fill, msg);
    Print("Narutto: ", id, " ", sym, " ", side, " -> ", msg);
    Report(id, ok, ticket, fill, msg);
    SendPositions();
@@ -354,6 +460,15 @@ void OnDeinit(const int reason)
 void OnTimer()
 {
    Poll();
+   if(InpAutoScan && InpAllowTrading)
+   {
+      datetime cur = iTime(_Symbol, PERIOD_M5, 0);
+      if(cur != 0 && cur != g_lastBar)
+      {
+         g_lastBar = cur;
+         SendCandles();
+      }
+   }
 }
 
 void OnTick()
