@@ -213,6 +213,8 @@ nav button.on{color:var(--accent)}
   <div class="sect">Auto-Trade <span class="chip" id="autoChip">OFF</span></div>
   <div class="card" id="autoCard">
     <div class="meta" id="autoInfo" style="margin-top:0">Save the bridge URL and token first.</div>
+    <button class="btn" id="btnNow" style="margin-top:12px;background:var(--green);color:#04170b">&#9889; Trade NOW (BTC + Gold)</button>
+    <div class="meta">Asks the AI right now and opens a trade on each pair that has chart data. Stop loss and risk limits still apply.</div>
     <div style="display:flex;gap:10px;margin-top:12px">
       <button class="btn sm" id="btnAutoOn" style="flex:1">Turn ON</button>
       <button class="btn grey sm" id="btnAutoOff" style="flex:1;border:1px solid var(--red2);color:var(--red)">STOP</button>
@@ -507,7 +509,7 @@ function renderAuto(a){
     (warn ? '<br><span style="color:var(--amber)">' + esc(warn) + '</span>' : "");
   var box = $("autoLog"); box.innerHTML = (a.log || []).length ? "" : '<div class="meta">Nothing yet.</div>';
   (a.log || []).forEach(function(e){
-    var col = e.result === "TRADE" || e.result === "ON" ? "var(--green)" : e.result === "ERROR" || e.result === "STOP" ? "var(--red)" : "var(--mute)";
+    var col = e.result === "TRADE" || e.result === "ON" || e.result === "NOW" ? "var(--green)" : e.result === "ERROR" || e.result === "STOP" ? "var(--red)" : "var(--mute)";
     var d2 = document.createElement("div"); d2.className = "meta";
     d2.innerHTML = '<b style="color:' + col + '">' + esc(e.result) + '</b> ' + esc(e.symbol) + ' &middot; ' + esc(ago(e.t)) + '<br>' + esc(e.msg);
     box.appendChild(d2);
@@ -517,6 +519,17 @@ function loadAuto(){ if (!S.bridge || !S.token) return; bridgeReq("/auto").then(
 $("btnAutoOn").onclick = function(){
   if (!confirm("Turn ON auto-trade?\n\nThe bot will place real orders on the MT5 account the EA is attached to, by itself, using the risk limits shown. Use a DEMO account first.")) return;
   autoPost({ enabled: 1 }).then(function(a){ renderAuto(a); toast("Auto-trade ON"); log("Auto-trade ON"); }).catch(function(e){ toast(e.message || e); });
+};
+$("btnNow").onclick = function(){
+  if (!confirm("Trade NOW?\n\nThe AI will pick a direction and the bot will open a trade on each pair that has chart data, with a stop loss, at the risk shown. It can lose. Use a DEMO account.")) return;
+  var btn = $("btnNow"); btn.disabled = true; btn.textContent = "Asking the AI...";
+  bridgeReq("/trade-now", { method: "POST", headers: { "Content-Type": "application/json" }, body: "{}" }).then(function(r){
+    var msg = (r.started || []).length ? "Scanning: " + r.started.join(", ") : "No scan started";
+    if ((r.blocked || []).length) msg += "\n" + r.blocked.map(function(b){ return b.symbol + ": " + b.why; }).join("\n");
+    toast(msg); log("Trade NOW: " + msg.replace(/\n/g, " | "));
+    var n = 0, t = setInterval(function(){ loadAuto(); loadPositions(); if (++n >= 12) clearInterval(t); }, 4000);
+    loadAuto();
+  }).catch(function(e){ toast(e.message || e); }).then(function(){ setTimeout(function(){ btn.disabled = false; btn.innerHTML = "&#9889; Trade NOW (BTC + Gold)"; }, 6000); });
 };
 $("btnAutoOff").onclick = function(){
   autoPost({ panic: 1 }).then(function(a){ renderAuto(a); toast("Auto-trade STOPPED"); log("Auto-trade STOPPED"); }).catch(function(e){ toast(e.message || e); });

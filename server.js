@@ -157,7 +157,7 @@ function gates(symbol, b) {
   return "GO";
 }
 
-function systemPrompt() {
+function systemPrompt(now) {
   const style = A.mode === "swing"
     ? "SWING/INTRADAY: trade idea lasts hours. Entry timeframe M15, bias from H1 and H4."
     : "SCALPING: trade idea lasts minutes to a couple of hours. Entry timeframe M5 (confirm on M15), bias from H1 and H4.";
@@ -166,7 +166,9 @@ function systemPrompt() {
     style,
     "You receive closed OHLC candles (oldest first) for M5, M15, H1, H4 and the live bid/ask. Use ONLY this data. Never invent prices.",
     "Read: higher-timeframe bias, market structure (BOS, CHoCH), liquidity (equal highs/lows, sweeps), points of interest (order block, FVG, supply/demand).",
-    "IMPORTANT: your order is executed AT MARKET right now. Return BUY or SELL only when a confirmed setup exists at the CURRENT price: a liquidity sweep or POI reaction followed by a CHoCH/BOS on the entry timeframe, with price still close to the POI. If the setup needs a pullback, price has already run, or structure is unclear, return WAIT. WAIT is the right answer most of the time. Do not chase.",
+    now
+      ? "ON-DEMAND MODE: the trader pressed Trade NOW and wants a position opened AT MARKET immediately. Pick the side that follows the higher-timeframe (H1/H4) bias, or the M15 structure if H1/H4 disagree. A perfect textbook setup is NOT required, and a pullback is not required. Place the stop beyond the nearest sensible invalidation swing and the take profit at the next liquidity level. Return WAIT only if the market looks closed, the data is unreadable, volatility is abnormal, or you truly cannot choose a side. Use low confidence (40-60) when the setup is average."
+      : "IMPORTANT: your order is executed AT MARKET right now. Return BUY or SELL only when a confirmed setup exists at the CURRENT price: a liquidity sweep or POI reaction followed by a CHoCH/BOS on the entry timeframe, with price still close to the POI. If the setup needs a pullback, price has already run, or structure is unclear, return WAIT. WAIT is the right answer most of the time. Do not chase.",
     "Stop loss beyond the invalidation swing and clearly wider than the spread. Take profit at the next liquidity pool. Minimum reward:risk " + A.minRR + ".",
     "Reply with ONE JSON object only, no markdown: {\"signal\":\"BUY|SELL|WAIT\",\"symbol\":\"\",\"entry\":0,\"sl\":0,\"tp\":0,\"confidence\":0-100,\"bias\":\"bullish|bearish|range\",\"reasons\":[\"short\"],\"invalidation\":\"short\"}.",
     "Confidence above 80 is almost never justified. Be honest."
@@ -178,11 +180,11 @@ function tfBlock(name, raw) {
   return name + " (" + rows.length + " candles, time|open|high|low|close)\n" + rows.join("\n");
 }
 
-async function askClaude(user) {
+async function askClaude(user, now) {
   const r = await fetch(API_URL, {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": API_KEY, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: A.model, max_tokens: 1200, system: systemPrompt(), messages: [{ role: "user", content: user }] }),
+    body: JSON.stringify({ model: A.model, max_tokens: 1200, system: systemPrompt(now), messages: [{ role: "user", content: user }] }),
     signal: AbortSignal.timeout(60000)
   });
   const j = await r.json().catch(() => ({}));
@@ -194,7 +196,7 @@ async function askClaude(user) {
 }
 
 // Decide if the AI answer may become an order. Returns {ok:true,...} or {ok:false,why}
-function judge(j, q) {
+function judge(j, q, minConf) {
   const sig = String(j.signal || "").toUpperCase();
   if (sig !== "BUY" && sig !== "SELL") return { ok: false, why: "AI says WAIT" + (Array.isArray(j.reasons) && j.reasons[0] ? ": " + String(j.reasons[0]).slice(0, 120) : "") };
   const sl = num(j.sl), tp = num(j.tp), conf = num(j.confidence), aiEntry = num(j.entry);
@@ -206,29 +208,32 @@ function judge(j, q) {
   if (risk < 3 * q.spread) return { ok: false, why: "Stop is tighter than 3x spread" };
   const rr = reward / risk;
   if (rr < A.minRR) return { ok: false, why: "Reward:risk " + rr.toFixed(2) + " below " + A.minRR };
-  if (!(conf >= A.minConf)) return { ok: false, why: "Confidence " + (Number.isFinite(conf) ? conf : "?") + " below " + A.minConf };
+  const need = minConf === undefined ? A.minConf : minConf;
+  if (!(conf >= need)) return { ok: false, why: "Confidence " + (Number.isFinite(conf) ? conf : "?") + " below " + need };
   if (aiEntry > 0 && Math.abs(aiEntry - price) > 0.5 * risk) return { ok: false, why: "Price already moved away from the AI entry" };
   return { ok: true, side: sig, entry: price, sl, tp, rr, conf };
 }
 
-async function runAutoScan(symbol, b) {
+async function runAutoScan(symbol, b, force) {
   const q = { bid: num(b.bid), ask: num(b.ask) };
   q.spread = q.ask - q.bid;
   if (!(q.bid > 0) || !(q.ask > 0) || q.spread < 0) throw new Error("bad live price");
   const user = "Symbol: " + symbol + "\nLive bid " + q.bid + " ask " + q.ask + " (spread " + q.spread.toFixed(5) + ")\n\n" +
     [tfBlock("M5", b.c5), tfBlock("M15", b.c15), tfBlock("H1", b.c60), tfBlock("H4", b.c240)].join("\n\n");
-  const j = await askClaude(user);
-  const v = judge(j, q);
+  const j = await askClaude(user, !!force);
+  const v = judge(j, q, force ? 35 : undefined);
   if (!v.ok) { logAuto(symbol, "WAIT", v.why); return; }
-  if (!db.auto.enabled) { logAuto(symbol, "SKIP", "Auto was switched off during the scan"); return; }
+  if (!force && !db.auto.enabled) { logAuto(symbol, "SKIP", "Auto was switched off during the scan"); return; }
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  db.signals.push({ id, symbol, side: v.side, entry: v.entry, sl: v.sl, tp: v.tp, lots: 0, risk: A.risk, source: "auto",
+  db.signals.push({ id, symbol, side: v.side, entry: v.entry, sl: v.sl, tp: v.tp, lots: 0, risk: A.risk, source: force ? "now" : "auto",
     status: "queued", created: Date.now(), msg: "AI auto, conf " + v.conf + ", RR " + v.rr.toFixed(2) });
-  logAuto(symbol, "TRADE", v.side + " queued  entry " + v.entry + "  SL " + v.sl + "  TP " + v.tp + "  RR " + v.rr.toFixed(2) + "  conf " + v.conf,
+  logAuto(symbol, "TRADE", (force ? "NOW  " : "") + v.side + " queued  entry " + v.entry + "  SL " + v.sl + "  TP " + v.tp + "  RR " + v.rr.toFixed(2) + "  conf " + v.conf,
     { side: v.side, entry: v.entry, sl: v.sl, tp: v.tp });
 }
 
+const lastCandles = {};
 function onCandles(symbol, b) {
+  lastCandles[symbol] = { b, ts: Date.now() };
   const g = gates(symbol, b);
   if (g === "") return { ok: true, scan: false };
   if (g !== "GO") { if (g !== "Auto is OFF") skip(symbol, g); return { ok: true, scan: false, reason: g }; }
@@ -239,6 +244,41 @@ function onCandles(symbol, b) {
   save();
   runAutoScan(symbol, b).catch((e) => logAuto(symbol, "ERROR", e.message || e)).then(() => { scanning[symbol] = false; });
   return { ok: true, scan: true };
+}
+
+function lossHalt() {
+  const day = dayRec();
+  if (day.halted) return day.halted;
+  if (day.startBalance > 0 && account.equity > 0) {
+    const lossPct = (day.startBalance - account.equity) / day.startBalance * 100;
+    if (lossPct >= A.dailyLoss) { day.halted = "Daily loss limit " + A.dailyLoss + "% reached - stopped until tomorrow"; save(); return day.halted; }
+  }
+  return "";
+}
+
+// Trade NOW: user pressed the button. One scan per symbol that has fresh candles.
+function tradeNow() {
+  const started = [], blocked = [];
+  if (!API_KEY) return { started, blocked: [{ symbol: "all", why: "Server has no ANTHROPIC_API_KEY" }] };
+  const acctAge = account.ts ? Date.now() - account.ts : Infinity;
+  if (acctAge > 90000) return { started, blocked: [{ symbol: "all", why: "No fresh account data from the EA (is MT5 open?)" }] };
+  const halt = lossHalt();
+  if (halt) return { started, blocked: [{ symbol: "all", why: halt }] };
+  A.symbols.forEach((symbol) => {
+    const c = lastCandles[symbol];
+    if (!c || Date.now() - c.ts > 240000) { blocked.push({ symbol, why: "No fresh chart data. Attach the EA to a " + symbol + " chart in MT5." }); return; }
+    const age = num(c.b.age);
+    if (!Number.isFinite(age) || age > 1500) { blocked.push({ symbol, why: "Market closed or data stale" }); return; }
+    if (account.open.some((p) => String(p.symbol || "").toUpperCase().indexOf(symbol) === 0)) { blocked.push({ symbol, why: "A " + symbol + " trade is already open" }); return; }
+    if (db.signals.some((x) => (x.status === "queued" || x.status === "sent") && x.symbol === symbol)) { blocked.push({ symbol, why: "An order for " + symbol + " is still being placed" }); return; }
+    if (scanning[symbol]) { blocked.push({ symbol, why: "A scan for " + symbol + " is already running" }); return; }
+    scanning[symbol] = true;
+    started.push(symbol);
+    logAuto(symbol, "NOW", "Trade NOW pressed - asking the AI");
+    runAutoScan(symbol, c.b, true).catch((e) => logAuto(symbol, "ERROR", e.message || e)).then(() => { scanning[symbol] = false; });
+  });
+  blocked.forEach((x) => logAuto(x.symbol, "SKIP", "Trade NOW: " + x.why));
+  return { started, blocked };
 }
 
 function autoStatus() {
@@ -421,7 +461,7 @@ const server = http.createServer(async (req, res) => {
       s.status = "sent";
       save();
       const f = [s.id, s.symbol, s.side, s.entry, s.sl, s.tp, s.lots];
-      if (s.source === "auto") f.push(s.risk);          // 8th field: risk % (EA sizes the lots)
+      if (s.source === "auto" || s.source === "now") f.push(s.risk);          // 8th field: risk % (EA sizes the lots)
       return send(res, 200, f.join("|"), "text/plain");
     }
 
@@ -431,6 +471,8 @@ const server = http.createServer(async (req, res) => {
       if (!symbol) return send(res, 400, { error: "bad symbol" });
       return send(res, 200, onCandles(symbol, b));
     }
+
+    if (req.method === "POST" && route === "/trade-now") return send(res, 200, tradeNow());
 
     if (req.method === "GET" && route === "/auto") return send(res, 200, autoStatus());
 
