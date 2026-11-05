@@ -215,6 +215,23 @@ nav button.on{color:var(--accent)}
     <div class="meta" id="autoInfo" style="margin-top:0">Save the bridge URL and token first.</div>
     <button class="btn" id="btnNow" style="margin-top:12px;background:var(--green);color:#04170b">&#9889; Trade NOW (BTC + Gold)</button>
     <div class="meta">Asks the AI right now and opens a trade on each pair that has chart data. Stop loss and risk limits still apply.</div>
+    <div class="meta" style="margin-top:14px"><b style="color:var(--text)">Trade settings</b></div>
+    <label>Lot size mode</label>
+    <select id="stLotMode"><option value="fixed">Fixed lot size (I choose)</option><option value="risk">Auto lot size (% risk)</option></select>
+    <label>Lot size (fixed mode)</label>
+    <input id="stLots" type="number" step="0.01" min="0.01" inputmode="decimal" placeholder="0.01">
+    <label>Risk % per trade (risk mode)</label>
+    <input id="stRisk" type="number" step="0.1" min="0.1" max="3" inputmode="decimal" placeholder="0.5">
+    <label>Max trades open at once</label>
+    <input id="stMaxOpen" type="number" step="1" min="1" max="10" inputmode="numeric" placeholder="2">
+    <label>Max trades per day</label>
+    <input id="stMaxDay" type="number" step="1" min="1" max="50" inputmode="numeric" placeholder="10">
+    <label>Daily loss stop % (0 = never stop)</label>
+    <input id="stLoss" type="number" step="0.5" min="0" max="10" inputmode="decimal" placeholder="0">
+    <div style="display:flex;gap:10px;margin-top:12px">
+      <button class="btn sm" id="btnStSave" style="flex:1">Save settings</button>
+      <button class="btn grey sm" id="btnStReset" style="flex:1">Reset today's limit</button>
+    </div>
     <div style="display:flex;gap:10px;margin-top:12px">
       <button class="btn sm" id="btnAutoOn" style="flex:1">Turn ON</button>
       <button class="btn grey sm" id="btnAutoOff" style="flex:1;border:1px solid var(--red2);color:var(--red)">STOP</button>
@@ -503,8 +520,9 @@ function renderAuto(a){
   if (!a.hasKey) warn = "Server has no ANTHROPIC_API_KEY yet (add it on Render).";
   else if (a.eaAgeSec == null || a.eaAgeSec > 90) warn = "EA is not sending data. Check MT5 is open and the EA is attached.";
   else if (d.halted) warn = d.halted;
+  if (!stInit && a.limits){ stInit = true; fillSettings(L); }
   $("autoInfo").innerHTML = '<b style="color:var(--text)">' + (on ? "Auto is ON" : "Auto is OFF") + '</b> &middot; ' + esc(a.mode) + ' mode &middot; ' + esc((a.symbols || []).join(", ")) +
-    '<br>Risk ' + esc(L.riskPct) + '% per trade &middot; max ' + esc(L.maxOpen) + ' open &middot; max ' + esc(L.maxTradesDay) + ' per day &middot; stops at -' + esc(L.dailyLossPct) + '% for the day' +
+    '<br>' + (L.lotMode === "fixed" ? esc(L.fixedLots) + ' lots per trade' : 'Risk ' + esc(L.riskPct) + '% per trade') + ' &middot; max ' + esc(L.maxOpen) + ' open &middot; max ' + esc(L.maxTradesDay) + ' per day &middot; ' + (L.dailyLossPct > 0 ? 'stops at -' + esc(L.dailyLossPct) + '% for the day' : 'no daily loss stop') +
     '<br>Today: ' + esc(d.scans) + ' scans &middot; ' + esc(d.trades) + ' trades &middot; day P/L ' + esc((-d.lossPct || 0).toFixed(2)) + '%' +
     (warn ? '<br><span style="color:var(--amber)">' + esc(warn) + '</span>' : "");
   var box = $("autoLog"); box.innerHTML = (a.log || []).length ? "" : '<div class="meta">Nothing yet.</div>';
@@ -515,6 +533,20 @@ function renderAuto(a){
     box.appendChild(d2);
   });
 }
+var stInit = false;
+function fillSettings(L){
+  $("stLotMode").value = L.lotMode || "risk"; $("stLots").value = L.fixedLots; $("stRisk").value = L.riskPct;
+  $("stMaxOpen").value = L.maxOpen; $("stMaxDay").value = L.maxTradesDay; $("stLoss").value = L.dailyLossPct;
+}
+$("btnStSave").onclick = function(){
+  var st = { lotMode: $("stLotMode").value, fixedLots: parseFloat($("stLots").value), riskPct: parseFloat($("stRisk").value),
+    maxOpen: parseInt($("stMaxOpen").value, 10), maxTradesDay: parseInt($("stMaxDay").value, 10), dailyLossPct: parseFloat($("stLoss").value) };
+  Object.keys(st).forEach(function(k){ if (typeof st[k] === "number" && !isFinite(st[k])) delete st[k]; });
+  autoPost({ settings: st }).then(function(a){ stInit = false; renderAuto(a); toast("Settings saved"); }).catch(function(e){ toast(e.message || e); });
+};
+$("btnStReset").onclick = function(){
+  autoPost({ resetDay: 1 }).then(function(a){ renderAuto(a); toast("Today's limit reset"); }).catch(function(e){ toast(e.message || e); });
+};
 function loadAuto(){ if (!S.bridge || !S.token) return; bridgeReq("/auto").then(renderAuto).catch(function(e){ $("autoInfo").textContent = "Could not reach the bridge: " + (e.message || e); }); }
 $("btnAutoOn").onclick = function(){
   if (!confirm("Turn ON auto-trade?\n\nThe bot will place real orders on the MT5 account the EA is attached to, by itself, using the risk limits shown. Use a DEMO account first.")) return;

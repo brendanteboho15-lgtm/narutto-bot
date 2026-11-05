@@ -20,7 +20,7 @@ let db = { signals: [] };
 try { db = JSON.parse(fs.readFileSync(DB_FILE, "utf8")); } catch (e) { /* fresh db */ }
 if (!db || !Array.isArray(db.signals)) db = { signals: [] };
 
-let account = { ts: 0, balance: 0, equity: 0, currency: "", open: [], closed: [] };
+let account = { ts: 0, balance: 0, equity: 0, currency: "", login: "", open: [], closed: [] };
 
 function save() {
   db.signals = db.signals.slice(-200);
@@ -89,18 +89,32 @@ const A = {
   risk: envNum("RISK_PCT", 0.5, 0.05, 2),              // % of balance risked per trade
   maxOpen: envNum("MAX_OPEN", 1, 1, 5),                // open positions at the same time
   maxTradesDay: envNum("MAX_TRADES_DAY", 3, 1, 20),
-  dailyLoss: envNum("DAILY_LOSS_PCT", 2, 0.5, 10),     // stop for the day when equity falls this % below the day's start
+  dailyLoss: envNum("DAILY_LOSS_PCT", 2, 0, 10),     // stop for the day when equity falls this % below the day's start
   maxScansDay: envNum("MAX_SCANS_DAY", 40, 1, 300),    // API budget guard
   minConf: envNum("MIN_CONF", 65, 0, 100),
   scanEveryMin: envNum("SCAN_EVERY_MIN", process.env.AUTO_MODE === "swing" ? 60 : 15, 1, 240),
   cooldownMin: envNum("COOLDOWN_MIN", 15, 0, 600)      // after a trade on the same symbol
 };
 A.minRR = A.mode === "swing" ? 1.5 : 1.2;
+A.lotMode = String(process.env.LOT_MODE || "risk").toLowerCase() === "fixed" ? "fixed" : "risk";
+A.fixedLots = envNum("FIXED_LOTS", 0.01, 0.01, MAX_LOTS);
 
 if (!db.auto || typeof db.auto !== "object") db.auto = {};
 db.auto.enabled = false;                               // always start OFF
 db.auto.log = Array.isArray(db.auto.log) ? db.auto.log : [];
 db.auto.day = db.auto.day || {};
+db.auto.settings = (db.auto.settings && typeof db.auto.settings === "object") ? db.auto.settings : {};
+function applySettings(st) {
+  const n = (v, lo, hi) => { const x = Number(v); return Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : null; };
+  let v;
+  if (st.lotMode === "fixed" || st.lotMode === "risk") A.lotMode = st.lotMode;
+  if ((v = n(st.fixedLots, 0.01, MAX_LOTS)) !== null) A.fixedLots = Math.round(v * 100) / 100;
+  if ((v = n(st.riskPct, 0.1, 3)) !== null) A.risk = v;
+  if ((v = n(st.maxOpen, 1, 10)) !== null) A.maxOpen = Math.round(v);
+  if ((v = n(st.maxTradesDay, 1, 50)) !== null) A.maxTradesDay = Math.round(v);
+  if ((v = n(st.dailyLossPct, 0, 10)) !== null) A.dailyLoss = v;
+}
+applySettings(db.auto.settings);
 
 const lastScan = {};
 const lastSkip = {};
@@ -108,13 +122,16 @@ const scanning = {};
 
 function today() { return new Date().toISOString().slice(0, 10); }
 function dayRec() {
-  if (db.auto.day.date !== today()) db.auto.day = { date: today(), startBalance: 0, scans: 0, halted: "" };
+  const d0 = db.auto.day;
+  const switched = account.login && d0.login && d0.login !== account.login;   // you changed MT5 account
+  if (d0.date !== today() || switched) db.auto.day = { date: today(), startBalance: 0, scans: 0, halted: "", login: account.login || "" };
   if (!db.auto.day.startBalance && account.equity > 0) db.auto.day.startBalance = account.equity;
+  if (!db.auto.day.login && account.login) db.auto.day.login = account.login;
   return db.auto.day;
 }
 function autoTradesToday() {
   const t = today();
-  return db.signals.filter((s) => s.source === "auto" && new Date(s.created).toISOString().slice(0, 10) === t &&
+  return db.signals.filter((s) => (s.source === "auto" || s.source === "now") && new Date(s.created).toISOString().slice(0, 10) === t &&
     ["queued", "sent", "filled"].indexOf(s.status) >= 0).length;
 }
 function logAuto(symbol, result, msg, extra) {
@@ -135,13 +152,15 @@ function gates(symbol, b) {
   const acctAge = account.ts ? Date.now() - account.ts : Infinity;
   if (acctAge > 90000) return "No fresh account data from the EA";
   const day = dayRec();
-  if (day.halted) return day.halted;
-  if (day.startBalance > 0 && account.equity > 0) {
-    const lossPct = (day.startBalance - account.equity) / day.startBalance * 100;
-    if (lossPct >= A.dailyLoss) {
-      day.halted = "Daily loss limit " + A.dailyLoss + "% reached - auto stopped until tomorrow";
-      save();
-      return day.halted;
+  if (A.dailyLoss > 0) {
+    if (day.halted) return day.halted;
+    if (day.startBalance > 0 && account.equity > 0) {
+      const lossPct = (day.startBalance - account.equity) / day.startBalance * 100;
+      if (lossPct >= A.dailyLoss) {
+        day.halted = "Daily loss limit " + A.dailyLoss + "% reached - auto stopped until tomorrow";
+        save();
+        return day.halted;
+      }
     }
   }
   const age = num(b.age);
@@ -225,7 +244,8 @@ async function runAutoScan(symbol, b, force) {
   if (!v.ok) { logAuto(symbol, "WAIT", v.why); return; }
   if (!force && !db.auto.enabled) { logAuto(symbol, "SKIP", "Auto was switched off during the scan"); return; }
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
-  db.signals.push({ id, symbol, side: v.side, entry: v.entry, sl: v.sl, tp: v.tp, lots: 0, risk: A.risk, source: force ? "now" : "auto",
+  const fixed = A.lotMode === "fixed";
+  db.signals.push({ id, symbol, side: v.side, entry: v.entry, sl: v.sl, tp: v.tp, lots: fixed ? A.fixedLots : 0, risk: fixed ? 0 : A.risk, source: force ? "now" : "auto",
     status: "queued", created: Date.now(), msg: "AI auto, conf " + v.conf + ", RR " + v.rr.toFixed(2) });
   logAuto(symbol, "TRADE", (force ? "NOW  " : "") + v.side + " queued  entry " + v.entry + "  SL " + v.sl + "  TP " + v.tp + "  RR " + v.rr.toFixed(2) + "  conf " + v.conf,
     { side: v.side, entry: v.entry, sl: v.sl, tp: v.tp });
@@ -248,6 +268,7 @@ function onCandles(symbol, b) {
 
 function lossHalt() {
   const day = dayRec();
+  if (!(A.dailyLoss > 0)) return "";
   if (day.halted) return day.halted;
   if (day.startBalance > 0 && account.equity > 0) {
     const lossPct = (day.startBalance - account.equity) / day.startBalance * 100;
@@ -262,9 +283,8 @@ function tradeNow() {
   if (!API_KEY) return { started, blocked: [{ symbol: "all", why: "Server has no ANTHROPIC_API_KEY" }] };
   const acctAge = account.ts ? Date.now() - account.ts : Infinity;
   if (acctAge > 90000) return { started, blocked: [{ symbol: "all", why: "No fresh account data from the EA (is MT5 open?)" }] };
-  const halt = lossHalt();
-  if (halt) return { started, blocked: [{ symbol: "all", why: halt }] };
   A.symbols.forEach((symbol) => {
+    if (account.open.length + started.length >= A.maxOpen) { blocked.push({ symbol, why: "Max open trades reached (" + A.maxOpen + ") - raise it in Settings" }); return; }
     const c = lastCandles[symbol];
     if (!c || Date.now() - c.ts > 240000) { blocked.push({ symbol, why: "No fresh chart data. Attach the EA to a " + symbol + " chart in MT5." }); return; }
     const age = num(c.b.age);
@@ -286,8 +306,9 @@ function autoStatus() {
   const lossPct = day.startBalance > 0 && account.equity > 0 ? (day.startBalance - account.equity) / day.startBalance * 100 : 0;
   return {
     enabled: !!db.auto.enabled, hasKey: !!API_KEY, mode: A.mode, model: A.model, symbols: A.symbols,
-    limits: { riskPct: A.risk, maxOpen: A.maxOpen, maxTradesDay: A.maxTradesDay, dailyLossPct: A.dailyLoss, minConf: A.minConf, minRR: A.minRR, scanEveryMin: A.scanEveryMin, maxScansDay: A.maxScansDay },
-    day: { date: day.date, scans: day.scans, trades: autoTradesToday(), lossPct: Math.round(lossPct * 100) / 100, halted: day.halted || "" },
+    limits: { lotMode: A.lotMode, fixedLots: A.fixedLots, riskPct: A.risk, maxOpen: A.maxOpen, maxTradesDay: A.maxTradesDay, dailyLossPct: A.dailyLoss, minConf: A.minConf, minRR: A.minRR, scanEveryMin: A.scanEveryMin, maxScansDay: A.maxScansDay },
+    day: { date: day.date, scans: day.scans, trades: autoTradesToday(), lossPct: Math.round(lossPct * 100) / 100, halted: A.dailyLoss > 0 ? (day.halted || "") : "" },
+    login: account.login || "",
     eaAgeSec: account.ts ? Math.round((Date.now() - account.ts) / 1000) : null,
     log: db.auto.log.slice(-15).reverse()
   };
@@ -482,6 +503,14 @@ const server = http.createServer(async (req, res) => {
         db.auto.enabled = false;
         db.signals.forEach((x) => { if (x.status === "queued") { x.status = "cancelled"; x.msg = "Cancelled by STOP"; } });
         logAuto("", "STOP", "Auto switched off (STOP pressed)");
+      } else if (String(b.resetDay) === "1") {          // clear the daily limit and start the day from the current equity
+        db.auto.day = { date: today(), startBalance: account.equity || 0, scans: 0, halted: "", login: account.login || "" };
+        Object.keys(lastSkip).forEach((k) => { lastSkip[k] = ""; });
+        logAuto("", "RESET", "Daily limit reset by you. Day now starts from equity " + (account.equity || 0));
+      } else if (b.settings && typeof b.settings === "object") {
+        db.auto.settings = Object.assign(db.auto.settings || {}, b.settings);
+        applySettings(b.settings);
+        logAuto("", "SET", "Settings saved: " + (A.lotMode === "fixed" ? A.fixedLots + " lots" : A.risk + "% risk") + ", max open " + A.maxOpen + ", max/day " + A.maxTradesDay + ", daily loss " + (A.dailyLoss > 0 ? A.dailyLoss + "%" : "OFF"));
       } else if (b.enabled !== undefined) {
         const on = String(b.enabled) === "1" || String(b.enabled) === "true";
         if (on && !API_KEY) return send(res, 400, { error: "Server has no ANTHROPIC_API_KEY - add it on Render first" });
@@ -515,7 +544,7 @@ const server = http.createServer(async (req, res) => {
       const rows = (s) => String(s || "").split(";").filter(Boolean).map((r) => r.split("|"));
       account = {
         ts: Date.now(),
-        balance: num(b.balance) || 0, equity: num(b.equity) || 0, currency: String(b.currency || "").slice(0, 8),
+        balance: num(b.balance) || 0, equity: num(b.equity) || 0, currency: String(b.currency || "").slice(0, 8), login: String(b.login || "").replace(/[^0-9]/g, "").slice(0, 20),
         open: rows(b.open).slice(0, 30).map((p) => ({ ticket: p[0], symbol: p[1], side: p[2], lots: num(p[3]), open: num(p[4]), sl: num(p[5]), tp: num(p[6]), price: num(p[7]), profit: num(p[8]) })),
         closed: rows(b.closed).slice(0, 20).map((p) => ({ ticket: p[0], symbol: p[1], side: p[2], lots: num(p[3]), price: num(p[4]), profit: num(p[5]), reason: p[6], time: p[7] }))
       };
