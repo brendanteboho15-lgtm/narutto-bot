@@ -113,7 +113,9 @@ function applySettings(st) {
   if ((v = n(st.maxOpen, 1, 10)) !== null) A.maxOpen = Math.round(v);
   if ((v = n(st.maxTradesDay, 1, 50)) !== null) A.maxTradesDay = Math.round(v);
   if ((v = n(st.dailyLossPct, 0, 10)) !== null) A.dailyLoss = v;
+  if (st.sniper === true || st.sniper === false || st.sniper === 1 || st.sniper === 0) A.sniper = !!st.sniper;
 }
+A.sniper = A.sniper !== false;
 applySettings(db.auto.settings);
 
 const lastScan = {};
@@ -190,7 +192,7 @@ function systemPrompt(now) {
       : "IMPORTANT: your order is executed AT MARKET right now. Return BUY or SELL only when a confirmed setup exists at the CURRENT price: a liquidity sweep or POI reaction followed by a CHoCH/BOS on the entry timeframe, with price still close to the POI. If the setup needs a pullback, price has already run, or structure is unclear, return WAIT. WAIT is the right answer most of the time. Do not chase.",
     "Stop loss beyond the invalidation swing and clearly wider than the spread. Take profit at the next liquidity pool. Minimum reward:risk " + A.minRR + ".",
     "Reply with ONE JSON object only, no markdown: {\"signal\":\"BUY|SELL|WAIT\",\"symbol\":\"\",\"entry\":0,\"sl\":0,\"tp\":0,\"confidence\":0-100,\"bias\":\"bullish|bearish|range\",\"reasons\":[\"short\"],\"invalidation\":\"short\"}.",
-    "Confidence above 80 is almost never justified. Be honest."
+    A.sniper ? "SNIPER MODE: the trader wants only A+ entries, win rate matters more than trade count. Return WAIT unless ALL of these hold: H4 and H1 bias agree; price just swept liquidity or reacted from an order block / FVG; a CHoCH or BOS confirmed on the entry timeframe; entry is at a discount (for buys) or premium (for sells) and NOT extended; stop sits beyond the invalidation swing; take profit at real liquidity with reward:risk of at least 2. If any item is missing, WAIT and say which one." : "Confidence above 80 is almost never justified. Be honest."
   ].join("\n");
 }
 
@@ -215,7 +217,37 @@ async function askClaude(user, now) {
 }
 
 // Decide if the AI answer may become an order. Returns {ok:true,...} or {ok:false,why}
-function judge(j, q, minConf) {
+// ---- Sniper filter: plain maths on the candles, independent of the AI ----
+function parseC(raw) {
+  return String(raw || "").split(";").filter(Boolean).map((r) => { const p = r.split("|"); return { o: +p[1], h: +p[2], l: +p[3], c: +p[4] }; }).filter((x) => x.c > 0);
+}
+function ema(vals, n) { if (vals.length < n) return null; const k = 2 / (n + 1); let e = vals.slice(0, n).reduce((a, b) => a + b, 0) / n; for (let i = n; i < vals.length; i++) e = vals[i] * k + e * (1 - k); return e; }
+function atr(c, n) { if (c.length < n + 1) return null; let t = 0; for (let i = c.length - n; i < c.length; i++) t += Math.max(c[i].h - c[i].l, Math.abs(c[i].h - c[i - 1].c), Math.abs(c[i].l - c[i - 1].c)); return t / n; }
+function rsi(vals, n) { if (vals.length < n + 1) return null; let g = 0, l = 0; for (let i = vals.length - n; i < vals.length; i++) { const d = vals[i] - vals[i - 1]; if (d > 0) g += d; else l -= d; } return l === 0 ? 100 : 100 - 100 / (1 + g / l); }
+function trendOf(c, fast, slow) { const cl = c.map((x) => x.c); const f = ema(cl, fast), sl = ema(cl, slow); if (f === null || sl === null) return 0; const px = cl[cl.length - 1]; return f > sl && px > sl ? 1 : f < sl && px < sl ? -1 : 0; }
+function sniperCheck(side, b, price, sl) {
+  const dir = side === "BUY" ? 1 : -1;
+  const h4 = parseC(b.c240), h1 = parseC(b.c60), m15 = parseC(b.c15), m5 = parseC(b.c5);
+  if (h1.length < 60 || m15.length < 60) return "Not enough chart history yet";
+  const t1 = trendOf(h1, 20, 50), t4 = h4.length >= 50 ? trendOf(h4, 20, 50) : t1, t15 = trendOf(m15, 20, 50);
+  if (t1 !== dir) return "H1 trend does not agree with " + side;
+  if (t4 === -dir) return "H4 trend is against " + side;
+  if (t15 === -dir) return "M15 trend is against " + side;
+  const a15 = atr(m15, 14);
+  if (!(a15 > 0)) return "No volatility reading";
+  const risk = Math.abs(price - sl);
+  if (risk < 0.8 * a15) return "Stop is too tight for current volatility (noise would hit it)";
+  if (risk > 3.5 * a15) return "Stop is too wide for this setup";
+  const e20 = ema(m15.map((x) => x.c), 20);
+  if (Math.abs(price - e20) > 1.8 * a15) return "Price is stretched far from the M15 average - not a sniper entry";
+  const r = rsi(m15.map((x) => x.c), 14);
+  if (r !== null && ((dir === 1 && r > 72) || (dir === -1 && r < 28))) return "Momentum is exhausted (RSI " + r.toFixed(0) + ")";
+  const last = m5[m5.length - 1];
+  if (last && ((dir === 1 && last.c < last.o && (last.o - last.c) > 1.2 * a15) || (dir === -1 && last.c > last.o && (last.c - last.o) > 1.2 * a15))) return "Last M5 candle is a big move against " + side;
+  return "";
+}
+
+function judge(j, q, minConf, rrMin, b) {
   const sig = String(j.signal || "").toUpperCase();
   if (sig !== "BUY" && sig !== "SELL") return { ok: false, why: "AI says WAIT" + (Array.isArray(j.reasons) && j.reasons[0] ? ": " + String(j.reasons[0]).slice(0, 120) : "") };
   const sl = num(j.sl), tp = num(j.tp), conf = num(j.confidence), aiEntry = num(j.entry);
@@ -226,10 +258,12 @@ function judge(j, q, minConf) {
   const risk = Math.abs(price - sl), reward = Math.abs(tp - price);
   if (risk < 3 * q.spread) return { ok: false, why: "Stop is tighter than 3x spread" };
   const rr = reward / risk;
-  if (rr < A.minRR) return { ok: false, why: "Reward:risk " + rr.toFixed(2) + " below " + A.minRR };
+  const rrNeed = rrMin || A.minRR;
+  if (rr < rrNeed) return { ok: false, why: "Reward:risk " + rr.toFixed(2) + " below " + rrNeed };
   const need = minConf === undefined ? A.minConf : minConf;
   if (!(conf >= need)) return { ok: false, why: "Confidence " + (Number.isFinite(conf) ? conf : "?") + " below " + need };
   if (aiEntry > 0 && Math.abs(aiEntry - price) > 0.5 * risk) return { ok: false, why: "Price already moved away from the AI entry" };
+  if (b) { const why = sniperCheck(sig, b, price, sl); if (why) return { ok: false, why: "Sniper filter: " + why }; }
   return { ok: true, side: sig, entry: price, sl, tp, rr, conf };
 }
 
@@ -239,8 +273,9 @@ async function runAutoScan(symbol, b, force) {
   if (!(q.bid > 0) || !(q.ask > 0) || q.spread < 0) throw new Error("bad live price");
   const user = "Symbol: " + symbol + "\nLive bid " + q.bid + " ask " + q.ask + " (spread " + q.spread.toFixed(5) + ")\n\n" +
     [tfBlock("M5", b.c5), tfBlock("M15", b.c15), tfBlock("H1", b.c60), tfBlock("H4", b.c240)].join("\n\n");
-  const j = await askClaude(user, !!force);
-  const v = judge(j, q, force ? 35 : undefined);
+  const sn = A.sniper;
+  const j = await askClaude(user, !!force && !sn);
+  const v = sn ? judge(j, q, Math.max(A.minConf, 70), Math.max(A.minRR, 2), b) : judge(j, q, force ? 35 : undefined);
   if (!v.ok) { logAuto(symbol, "WAIT", v.why); return; }
   if (!force && !db.auto.enabled) { logAuto(symbol, "SKIP", "Auto was switched off during the scan"); return; }
   const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
@@ -306,7 +341,7 @@ function autoStatus() {
   const lossPct = day.startBalance > 0 && account.equity > 0 ? (day.startBalance - account.equity) / day.startBalance * 100 : 0;
   return {
     enabled: !!db.auto.enabled, hasKey: !!API_KEY, mode: A.mode, model: A.model, symbols: A.symbols,
-    limits: { lotMode: A.lotMode, fixedLots: A.fixedLots, riskPct: A.risk, maxOpen: A.maxOpen, maxTradesDay: A.maxTradesDay, dailyLossPct: A.dailyLoss, minConf: A.minConf, minRR: A.minRR, scanEveryMin: A.scanEveryMin, maxScansDay: A.maxScansDay },
+    limits: { sniper: A.sniper, lotMode: A.lotMode, fixedLots: A.fixedLots, riskPct: A.risk, maxOpen: A.maxOpen, maxTradesDay: A.maxTradesDay, dailyLossPct: A.dailyLoss, minConf: A.minConf, minRR: A.minRR, scanEveryMin: A.scanEveryMin, maxScansDay: A.maxScansDay },
     day: { date: day.date, scans: day.scans, trades: autoTradesToday(), lossPct: Math.round(lossPct * 100) / 100, halted: A.dailyLoss > 0 ? (day.halted || "") : "" },
     login: account.login || "",
     eaAgeSec: account.ts ? Math.round((Date.now() - account.ts) / 1000) : null,
@@ -510,7 +545,7 @@ const server = http.createServer(async (req, res) => {
       } else if (b.settings && typeof b.settings === "object") {
         db.auto.settings = Object.assign(db.auto.settings || {}, b.settings);
         applySettings(b.settings);
-        logAuto("", "SET", "Settings saved: " + (A.lotMode === "fixed" ? A.fixedLots + " lots" : A.risk + "% risk") + ", max open " + A.maxOpen + ", max/day " + A.maxTradesDay + ", daily loss " + (A.dailyLoss > 0 ? A.dailyLoss + "%" : "OFF"));
+        logAuto("", "SET", "Settings saved: " + (A.sniper ? "SNIPER on, " : "sniper off, ") + (A.lotMode === "fixed" ? A.fixedLots + " lots" : A.risk + "% risk") + ", max open " + A.maxOpen + ", max/day " + A.maxTradesDay + ", daily loss " + (A.dailyLoss > 0 ? A.dailyLoss + "%" : "OFF"));
       } else if (b.enabled !== undefined) {
         const on = String(b.enabled) === "1" || String(b.enabled) === "true";
         if (on && !API_KEY) return send(res, 400, { error: "Server has no ANTHROPIC_API_KEY - add it on Render first" });

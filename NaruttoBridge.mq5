@@ -4,7 +4,7 @@
 //| L99 standard: ASCII only, handle-free, no chart object clutter   |
 //+------------------------------------------------------------------+
 #property copyright "Narutto AfriQa Bot"
-#property version   "1.10"
+#property version   "1.21"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -14,17 +14,18 @@ input string InpToken           = "";        // Bridge token
 input int    InpPollSeconds     = 3;         // Poll interval (seconds)
 input long   InpMagic           = 990001;    // Magic number
 input string InpSymbolSuffix    = "";        // Broker symbol suffix, e.g. m (leave empty if none)
-input double InpMaxSpreadPoints = 80.0;      // Max spread in points (0 = no check)
-input double InpMaxDriftPoints  = 500.0;     // Max distance from signal entry in points (0 = no check)
+input double InpMaxSpreadPoints = 3000.0;      // Max spread in points (0 = no check)
+input double InpMaxDriftPoints  = 20000.0;     // Max distance from signal entry in points (0 = no check)
 input double InpMaxLots         = 1.0;       // Hard lot cap
 input int    InpSlippagePoints  = 30;        // Max slippage in points
 input bool   InpAllowTrading    = true;      // Master switch
 input bool   InpAutoScan        = true;      // Send candles to the bridge for AI auto-trading
 input int    InpBarsM5          = 80;        // Candles sent: M5
-input int    InpBarsM15         = 60;        // Candles sent: M15
-input int    InpBarsH1          = 60;        // Candles sent: H1
-input int    InpBarsH4          = 40;        // Candles sent: H4
+input int    InpBarsM15         = 100;        // Candles sent: M15
+input int    InpBarsH1          = 120;        // Candles sent: H1
+input int    InpBarsH4          = 80;        // Candles sent: H4
 input int    InpMaxPositions    = 3;         // Hard cap on open positions with this magic (0 = no cap)
+input double InpMinLotRiskCapPct = 0.0;      // Small accounts: if the risk-sized lot is below the broker minimum, trade the minimum lot only when it risks at most this % of balance (0 = off, max 3)
 
 CTrade g_trade;
 string g_handled[];
@@ -207,6 +208,7 @@ bool Execute(const string sym, const string side, const double entry, const doub
    if(stepLot <= 0.0)
       stepLot = 0.01;
    double want = lotsIn;
+   double lossPerLot = 0.0;
    if(want <= 0.0 && riskPct > 0.0)
    {
       double tickSize = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
@@ -216,7 +218,7 @@ bool Execute(const string sym, const string side, const double entry, const doub
          msg = "No tick value for risk sizing";
          return(false);
       }
-      double lossPerLot = MathAbs(price - sl) / tickSize * tickVal;
+      lossPerLot = MathAbs(price - sl) / tickSize * tickVal;
       if(lossPerLot <= 0.0)
       {
          msg = "Bad stop distance for risk sizing";
@@ -234,8 +236,20 @@ bool Execute(const string sym, const string side, const double entry, const doub
    lots = MathFloor(lots / stepLot + 0.0000001) * stepLot;
    if(lots < minLot)
    {
-      msg = "Lot below broker minimum " + DoubleToString(minLot, 2) + " (risk too small for this account)";
-      return(false);
+      double bal = AccountInfoDouble(ACCOUNT_BALANCE);
+      double minRisk = 0.0;
+      if(lossPerLot > 0.0 && bal > 0.0)
+         minRisk = minLot * lossPerLot / bal * 100.0;
+      double cap = MathMin(InpMinLotRiskCapPct, 3.0);
+      if(cap > 0.0 && minRisk > 0.0 && minRisk <= cap)
+         lots = minLot;
+      else
+      {
+         msg = "Lot below broker minimum " + DoubleToString(minLot, 2) + ": the minimum lot would risk "
+             + DoubleToString(minRisk, 2) + "% of balance (limit " + DoubleToString(riskPct, 2)
+             + "%, cap " + DoubleToString(cap, 2) + "%)";
+         return(false);
+      }
    }
    lots = NormalizeDouble(lots, 2);
 
@@ -327,7 +341,8 @@ void SendPositions()
    string body = "open=" + UrlEncode(openRows) + "&closed=" + UrlEncode(closedRows)
                + "&balance=" + DoubleToString(AccountInfoDouble(ACCOUNT_BALANCE), 2)
                + "&equity=" + DoubleToString(AccountInfoDouble(ACCOUNT_EQUITY), 2)
-               + "&currency=" + UrlEncode(AccountInfoString(ACCOUNT_CURRENCY));
+               + "&currency=" + UrlEncode(AccountInfoString(ACCOUNT_CURRENCY))
+               + "&login=" + IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN));
    string resp;
    Http("POST", "/positions", body, resp);
 }

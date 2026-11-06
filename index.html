@@ -216,6 +216,8 @@ nav button.on{color:var(--accent)}
     <button class="btn" id="btnNow" style="margin-top:12px;background:var(--green);color:#04170b">&#9889; Trade NOW (BTC + Gold)</button>
     <div class="meta">Asks the AI right now and opens a trade on each pair that has chart data. Stop loss and risk limits still apply.</div>
     <div class="meta" style="margin-top:14px"><b style="color:var(--text)">Trade settings</b></div>
+    <label>Entry quality</label>
+    <select id="stSniper"><option value="1">Sniper (strict - trades only A+ setups)</option><option value="0">Normal (trades more, weaker setups)</option></select>
     <label>Lot size mode</label>
     <select id="stLotMode"><option value="fixed">Fixed lot size (I choose)</option><option value="risk">Auto lot size (% risk)</option></select>
     <label>Lot size (fixed mode)</label>
@@ -522,7 +524,7 @@ function renderAuto(a){
   else if (d.halted) warn = d.halted;
   if (!stInit && a.limits){ stInit = true; fillSettings(L); }
   $("autoInfo").innerHTML = '<b style="color:var(--text)">' + (on ? "Auto is ON" : "Auto is OFF") + '</b> &middot; ' + esc(a.mode) + ' mode &middot; ' + esc((a.symbols || []).join(", ")) +
-    '<br>' + (L.lotMode === "fixed" ? esc(L.fixedLots) + ' lots per trade' : 'Risk ' + esc(L.riskPct) + '% per trade') + ' &middot; max ' + esc(L.maxOpen) + ' open &middot; max ' + esc(L.maxTradesDay) + ' per day &middot; ' + (L.dailyLossPct > 0 ? 'stops at -' + esc(L.dailyLossPct) + '% for the day' : 'no daily loss stop') +
+    '<br>' + (L.sniper === false ? 'Normal mode' : '<b style="color:var(--green)">Sniper mode</b>') + ' &middot; ' + (L.lotMode === "fixed" ? esc(L.fixedLots) + ' lots per trade' : 'Risk ' + esc(L.riskPct) + '% per trade') + ' &middot; max ' + esc(L.maxOpen) + ' open &middot; max ' + esc(L.maxTradesDay) + ' per day &middot; ' + (L.dailyLossPct > 0 ? 'stops at -' + esc(L.dailyLossPct) + '% for the day' : 'no daily loss stop') +
     '<br>Today: ' + esc(d.scans) + ' scans &middot; ' + esc(d.trades) + ' trades &middot; day P/L ' + esc((-d.lossPct || 0).toFixed(2)) + '%' +
     (warn ? '<br><span style="color:var(--amber)">' + esc(warn) + '</span>' : "");
   var box = $("autoLog"); box.innerHTML = (a.log || []).length ? "" : '<div class="meta">Nothing yet.</div>';
@@ -535,11 +537,12 @@ function renderAuto(a){
 }
 var stInit = false;
 function fillSettings(L){
+  $("stSniper").value = L.sniper === false ? "0" : "1";
   $("stLotMode").value = L.lotMode || "risk"; $("stLots").value = L.fixedLots; $("stRisk").value = L.riskPct;
   $("stMaxOpen").value = L.maxOpen; $("stMaxDay").value = L.maxTradesDay; $("stLoss").value = L.dailyLossPct;
 }
 $("btnStSave").onclick = function(){
-  var st = { lotMode: $("stLotMode").value, fixedLots: parseFloat($("stLots").value), riskPct: parseFloat($("stRisk").value),
+  var st = { sniper: $("stSniper").value === "1", lotMode: $("stLotMode").value, fixedLots: parseFloat($("stLots").value), riskPct: parseFloat($("stRisk").value),
     maxOpen: parseInt($("stMaxOpen").value, 10), maxTradesDay: parseInt($("stMaxDay").value, 10), dailyLossPct: parseFloat($("stLoss").value) };
   Object.keys(st).forEach(function(k){ if (typeof st[k] === "number" && !isFinite(st[k])) delete st[k]; });
   autoPost({ settings: st }).then(function(a){ stInit = false; renderAuto(a); toast("Settings saved"); }).catch(function(e){ toast(e.message || e); });
