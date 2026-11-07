@@ -342,7 +342,7 @@ function statsNow() {
   const login = account.login;
   const byTrade = {};
   db.history.filter((h) => !login || !h.login || h.login === login).forEach((h) => {
-    const t = byTrade[h.ticket] = byTrade[h.ticket] || { symbol: h.symbol, profit: 0, time: h.time };
+    const t = byTrade[h.ticket] = byTrade[h.ticket] || { symbol: h.symbol, profit: 0, time: h.time, mode: h.mode === "MOM" ? "MOM" : "AI" };
     t.profit += h.profit || 0;
   });
   const trades = Object.keys(byTrade).map((k) => byTrade[k]);
@@ -355,6 +355,7 @@ function statsNow() {
       profitFactor: gl > 0 ? Math.round(gw / gl * 100) / 100 : (gw > 0 ? null : 0) };
   };
   const out = { all: pack(trades), bySymbol: {}, currency: account.currency || "", note: trades.length < 30 ? "Fewer than 30 trades - too early to judge the bot." : "" };
+  out.byMode = { AI: pack(trades.filter((t) => t.mode !== "MOM")), MOM: pack(trades.filter((t) => t.mode === "MOM")) };
   ["XAUUSD", "BTCUSD"].forEach((sy) => { out.bySymbol[sy] = pack(trades.filter((t) => t.symbol === sy)); });
   return out;
 }
@@ -604,12 +605,12 @@ const server = http.createServer(async (req, res) => {
         ts: Date.now(),
         balance: num(b.balance) || 0, equity: num(b.equity) || 0, currency: String(b.currency || "").slice(0, 8), login: String(b.login || "").replace(/[^0-9]/g, "").slice(0, 20),
         open: rows(b.open).slice(0, 30).map((p) => ({ ticket: p[0], symbol: p[1], side: p[2], lots: num(p[3]), open: num(p[4]), sl: num(p[5]), tp: num(p[6]), price: num(p[7]), profit: num(p[8]) })),
-        closed: rows(b.closed).slice(0, 20).map((p) => ({ ticket: p[0], symbol: p[1], side: p[2], lots: num(p[3]), price: num(p[4]), profit: num(p[5]), reason: p[6], time: p[7] }))
+        closed: rows(b.closed).slice(0, 20).map((p) => ({ ticket: p[0], symbol: p[1], side: p[2], lots: num(p[3]), price: num(p[4]), profit: num(p[5]), reason: p[6], time: p[7], mode: p[8] === "MOM" ? "MOM" : "AI" }))
       };
       let added = 0;
       account.closed.forEach((c) => {
         const key = c.ticket + "|" + c.time + "|" + c.profit;
-        if (!db.history.some((h) => h.key === key)) { db.history.push({ key, ticket: c.ticket, symbol: String(c.symbol || "").replace(/m$/i, "").toUpperCase(), side: c.side, profit: c.profit, reason: c.reason, time: c.time, login: account.login, at: Date.now() }); added++; }
+        if (!db.history.some((h) => h.key === key)) { db.history.push({ key, ticket: c.ticket, symbol: String(c.symbol || "").replace(/m$/i, "").toUpperCase(), side: c.side, profit: c.profit, reason: c.reason, time: c.time, mode: c.mode, login: account.login, at: Date.now() }); added++; }
       });
       if (added) { db.history = db.history.slice(-1000); save(); }
       return send(res, 200, { ok: true });

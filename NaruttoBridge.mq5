@@ -4,7 +4,7 @@
 //| L99 standard: ASCII only, handle-free, no chart object clutter   |
 //+------------------------------------------------------------------+
 #property copyright "Narutto AfriQa Bot"
-#property version   "1.30"
+#property version   "1.40"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -33,7 +33,19 @@ input double InpPartialAtR      = 1.0;       // Partial close target in R
 input double InpTrailAtR        = 1.5;       // Start trailing the stop at this many R (0 = off)
 input double InpTrailDistR      = 1.0;       // Trailing stop distance in R
 
+input bool   InpMomentum        = false;     // MOMENTUM SCALPER: trade strong candle breakouts on THIS chart without the AI (OFF by default)
+input ENUM_TIMEFRAMES InpMomTF  = PERIOD_M5; // Momentum: candle timeframe
+input int    InpMomLookback     = 15;        // Momentum: candle must close beyond the high/low of this many candles
+input double InpMomBodyATR      = 0.8;       // Momentum: candle body must be at least this many ATR (filters weak candles)
+input double InpMomSLATR        = 1.0;       // Momentum: stop loss = this many ATR
+input double InpMomRR           = 1.5;       // Momentum: take profit = this many times the stop
+input double InpMomLots         = 0.01;      // Momentum: fixed lot size
+input int    InpMomMaxLossStreak = 3;        // Momentum: pause after this many losing closes in a row (0 = off)
+input int    InpMomPauseMin     = 60;        // Momentum: pause length in minutes
+input bool   InpMomGoldHours    = true;      // Momentum: gold only trades 06:00-20:00 UTC
+
 CTrade g_trade;
+datetime g_lastMomBar = 0;
 string g_handled[];
 int    g_failStreak = 0;
 datetime g_lastBar  = 0;
@@ -336,7 +348,8 @@ void SendPositions()
                     + "|" + side + "|" + DoubleToString(HistoryDealGetDouble(dt, DEAL_VOLUME), 2)
                     + "|" + DoubleToString(HistoryDealGetDouble(dt, DEAL_PRICE), 5)
                     + "|" + DoubleToString(pl, 2) + "|" + rs
-                    + "|" + TimeToString((datetime)HistoryDealGetInteger(dt, DEAL_TIME), TIME_DATE | TIME_MINUTES);
+                    + "|" + TimeToString((datetime)HistoryDealGetInteger(dt, DEAL_TIME), TIME_DATE | TIME_MINUTES)
+                    + "|" + (GlobalVariableCheck("NBM_" + IntegerToString(HistoryDealGetInteger(dt, DEAL_POSITION_ID))) ? "MOM" : "AI");
          if(closedRows != "")
             closedRows += ";";
          closedRows += row;
@@ -558,10 +571,172 @@ void ManagePositions()
    }
 }
 
+//+------------------------------------------------------------------+
+//| Momentum scalper helpers                                          |
+//+------------------------------------------------------------------+
+bool MomEma(const ENUM_TIMEFRAMES tf, const int period, double &out)
+{
+   int n = period * 4 + 2;
+   double c[];
+   ArraySetAsSeries(c, false);
+   if(CopyClose(_Symbol, tf, 0, n, c) != n)
+      return false;
+   double k = 2.0 / (period + 1);
+   double e = c[0];
+   for(int i = 1; i < n - 1; i++)      // n-1 is the still-forming bar: ignored
+      e = c[i] * k + e * (1.0 - k);
+   out = e;
+   return true;
+}
+
+int MomTrend(const ENUM_TIMEFRAMES tf)
+{
+   double e20, e50;
+   if(!MomEma(tf, 20, e20) || !MomEma(tf, 50, e50))
+      return 0;
+   double px = iClose(_Symbol, tf, 1);
+   if(e20 > e50 && px > e50) return 1;
+   if(e20 < e50 && px < e50) return -1;
+   return 0;
+}
+
+bool MomPaused()
+{
+   if(InpMomMaxLossStreak <= 0)
+      return false;
+   if(!HistorySelect(TimeCurrent() - 2 * 86400, TimeCurrent() + 60))
+      return false;
+   int streak = 0;
+   datetime lastLoss = 0;
+   for(int i = HistoryDealsTotal() - 1; i >= 0; i--)
+   {
+      ulong dt = HistoryDealGetTicket(i);
+      if(dt == 0 || HistoryDealGetInteger(dt, DEAL_MAGIC) != InpMagic)
+         continue;
+      if(HistoryDealGetInteger(dt, DEAL_ENTRY) != DEAL_ENTRY_OUT)
+         continue;
+      double p = HistoryDealGetDouble(dt, DEAL_PROFIT) + HistoryDealGetDouble(dt, DEAL_SWAP) + HistoryDealGetDouble(dt, DEAL_COMMISSION);
+      if(p < 0.0)
+      {
+         streak++;
+         if(lastLoss == 0)
+            lastLoss = (datetime)HistoryDealGetInteger(dt, DEAL_TIME);
+      }
+      else
+         break;
+   }
+   return (streak >= InpMomMaxLossStreak && lastLoss > 0 && (TimeCurrent() - lastLoss) < InpMomPauseMin * 60);
+}
+
+void MomentumTick()
+{
+   datetime cur = iTime(_Symbol, InpMomTF, 0);
+   if(cur == 0 || cur == g_lastMomBar)
+      return;
+   g_lastMomBar = cur;                       // one decision per new candle
+
+   if(SymbolInfoInteger(_Symbol, SYMBOL_TRADE_MODE) != SYMBOL_TRADE_MODE_FULL)
+      return;
+   if(InpMomGoldHours && StringFind(_Symbol, "XAU") == 0)
+   {
+      MqlDateTime t;
+      TimeToStruct(TimeGMT(), t);
+      if(t.hour < 6 || t.hour >= 20)
+         return;
+   }
+   for(int i = PositionsTotal() - 1; i >= 0; i--)        // one momentum trade per symbol at a time
+   {
+      ulong tk = PositionGetTicket(i);
+      if(tk != 0 && PositionGetInteger(POSITION_MAGIC) == InpMagic && PositionGetString(POSITION_SYMBOL) == _Symbol)
+         return;
+   }
+   if(InpMaxPositions > 0 && CountMyPositions() >= InpMaxPositions)
+      return;
+   if(MomPaused())
+      return;
+
+   int look = InpMomLookback;
+   if(look < 3) look = 3;
+   int need = MathMax(look, 14) + 4;
+   MqlRates r[];
+   ArraySetAsSeries(r, false);
+   if(CopyRates(_Symbol, InpMomTF, 0, need, r) != need)
+      return;
+   int last = need - 2;                      // last CLOSED candle; need-1 is forming
+   double atr = 0.0;
+   for(int i = last - 13; i <= last; i++)
+      atr += MathMax(r[i].high - r[i].low, MathMax(MathAbs(r[i].high - r[i - 1].close), MathAbs(r[i].low - r[i - 1].close)));
+   atr /= 14.0;
+   if(atr <= 0.0)
+      return;
+   double hh = -DBL_MAX, ll = DBL_MAX;
+   for(int i = last - look; i < last; i++)
+   {
+      hh = MathMax(hh, r[i].high);
+      ll = MathMin(ll, r[i].low);
+   }
+   double body = MathAbs(r[last].close - r[last].open);
+   double rng  = r[last].high - r[last].low;
+   if(body < InpMomBodyATR * atr || rng <= 0.0)
+      return;
+   int dir = 0;
+   if(r[last].close > hh && r[last].close > r[last].open && (r[last].close - r[last].low) / rng >= 0.7)
+      dir = 1;
+   else if(r[last].close < ll && r[last].close < r[last].open && (r[last].high - r[last].close) / rng >= 0.7)
+      dir = -1;
+   if(dir == 0)
+      return;
+   if(MomTrend(PERIOD_M15) != dir || MomTrend(PERIOD_H1) != dir)
+      return;                                // never fight the higher timeframes
+
+   double point = SymbolInfoDouble(_Symbol, SYMBOL_POINT);
+   double ask = SymbolInfoDouble(_Symbol, SYMBOL_ASK);
+   double bid = SymbolInfoDouble(_Symbol, SYMBOL_BID);
+   int digits = (int)SymbolInfoInteger(_Symbol, SYMBOL_DIGITS);
+   if(point <= 0.0 || ask <= 0.0 || bid <= 0.0)
+      return;
+   double spread = ask - bid;
+   if(InpMaxSpreadPoints > 0.0 && spread / point > InpMaxSpreadPoints)
+      return;
+   double minStop = (double)SymbolInfoInteger(_Symbol, SYMBOL_TRADE_STOPS_LEVEL) * point;
+   double slDist = MathMax(atr * InpMomSLATR, minStop * 1.5 + spread);
+   if(spread > 0.25 * slDist)
+      return;                                // costs would eat the trade
+   double entry = (dir == 1) ? ask : bid;
+   double sl = (dir == 1) ? entry - slDist : entry + slDist;
+   double tp = (dir == 1) ? entry + slDist * InpMomRR : entry - slDist * InpMomRR;
+   sl = NormalizeDouble(sl, digits);
+   tp = NormalizeDouble(tp, digits);
+
+   double step = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_STEP);
+   double minLot = SymbolInfoDouble(_Symbol, SYMBOL_VOLUME_MIN);
+   if(step <= 0.0) step = 0.01;
+   double lots = MathFloor(InpMomLots / step + 1e-9) * step;
+   if(lots < minLot) lots = minLot;
+   if(InpMaxLots > 0.0 && lots > InpMaxLots) lots = InpMaxLots;
+   lots = NormalizeDouble(lots, 2);
+
+   g_trade.SetExpertMagicNumber(InpMagic);
+   g_trade.SetDeviationInPoints(InpSlippagePoints);
+   bool ok = (dir == 1) ? g_trade.Buy(lots, _Symbol, 0.0, sl, tp, "NaruttoMom")
+                        : g_trade.Sell(lots, _Symbol, 0.0, sl, tp, "NaruttoMom");
+   if(!ok)
+   {
+      Print("Momentum order failed: ", g_trade.ResultRetcodeDescription(), " (", (int)g_trade.ResultRetcode(), ")");
+      return;
+   }
+   ulong tk = g_trade.ResultOrder();
+   if((tk != 0 && PositionSelectByTicket(tk)) || PositionSelect(_Symbol))
+      GlobalVariableSet("NBM_" + IntegerToString(PositionGetInteger(POSITION_IDENTIFIER)), 1.0);
+   Print("Momentum ", (dir == 1 ? "BUY " : "SELL "), _Symbol, " ", DoubleToString(lots, 2), " lots SL ", DoubleToString(sl, digits), " TP ", DoubleToString(tp, digits));
+}
+
 void OnTimer()
 {
    Poll();
    ManagePositions();
+   if(InpMomentum && InpAllowTrading)
+      MomentumTick();
    if(InpAutoScan && InpAllowTrading)
    {
       datetime cur = iTime(_Symbol, PERIOD_M5, 0);

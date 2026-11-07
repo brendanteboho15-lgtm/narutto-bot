@@ -544,6 +544,7 @@ function renderStats(x){
   var h = a.trades ? line("All", a).slice(4) : "No closed trades yet.";
   if (a.trades){
     h += '<br>Avg win ' + esc(a.avgWin) + ' &middot; avg loss ' + esc(a.avgLoss) + ' &middot; profit factor ' + (a.profitFactor == null ? "-" : esc(a.profitFactor));
+    var m = x.byMode || {}; if (m.MOM && m.MOM.trades) { h += line("AI trades", m.AI || {}) + line("Momentum scalper", m.MOM); }
     var b = x.bySymbol || {}; Object.keys(b).forEach(function(k){ if (b[k].trades) h += line(k, b[k]); });
   }
   if (x.note) h += '<br><span style="color:var(--amber)">' + esc(x.note) + '</span>';
