@@ -103,6 +103,7 @@ if (!db.auto || typeof db.auto !== "object") db.auto = {};
 db.auto.enabled = false;                               // always start OFF
 db.auto.log = Array.isArray(db.auto.log) ? db.auto.log : [];
 db.auto.day = db.auto.day || {};
+db.history = Array.isArray(db.history) ? db.history : [];
 db.auto.settings = (db.auto.settings && typeof db.auto.settings === "object") ? db.auto.settings : {};
 function applySettings(st) {
   const n = (v, lo, hi) => { const x = Number(v); return Number.isFinite(x) ? Math.min(hi, Math.max(lo, x)) : null; };
@@ -274,6 +275,7 @@ async function runAutoScan(symbol, b, force) {
   const user = "Symbol: " + symbol + "\nLive bid " + q.bid + " ask " + q.ask + " (spread " + q.spread.toFixed(5) + ")\n\n" +
     [tfBlock("M5", b.c5), tfBlock("M15", b.c15), tfBlock("H1", b.c60), tfBlock("H4", b.c240)].join("\n\n");
   const sn = A.sniper;
+  if (sn && /^XAU/.test(symbol)) { const hr = new Date().getUTCHours(); if (hr < 6 || hr >= 20) { logAuto(symbol, "WAIT", "Sniper: gold is thin outside London/New York hours (06:00-20:00 UTC)"); return; } }
   const j = await askClaude(user, !!force && !sn);
   const v = sn ? judge(j, q, Math.max(A.minConf, 70), Math.max(A.minRR, 2), b) : judge(j, q, force ? 35 : undefined);
   if (!v.ok) { logAuto(symbol, "WAIT", v.why); return; }
@@ -334,6 +336,27 @@ function tradeNow() {
   });
   blocked.forEach((x) => logAuto(x.symbol, "SKIP", "Trade NOW: " + x.why));
   return { started, blocked };
+}
+
+function statsNow() {
+  const login = account.login;
+  const byTrade = {};
+  db.history.filter((h) => !login || !h.login || h.login === login).forEach((h) => {
+    const t = byTrade[h.ticket] = byTrade[h.ticket] || { symbol: h.symbol, profit: 0, time: h.time };
+    t.profit += h.profit || 0;
+  });
+  const trades = Object.keys(byTrade).map((k) => byTrade[k]);
+  const pack = (list) => {
+    const w = list.filter((t) => t.profit > 0.005), l = list.filter((t) => t.profit < -0.005);
+    const gw = w.reduce((a, t) => a + t.profit, 0), gl = -l.reduce((a, t) => a + t.profit, 0);
+    const done = w.length + l.length;
+    return { trades: list.length, wins: w.length, losses: l.length, winRate: done ? Math.round(w.length / done * 1000) / 10 : null,
+      net: Math.round((gw - gl) * 100) / 100, avgWin: w.length ? Math.round(gw / w.length * 100) / 100 : 0, avgLoss: l.length ? Math.round(gl / l.length * 100) / 100 : 0,
+      profitFactor: gl > 0 ? Math.round(gw / gl * 100) / 100 : (gw > 0 ? null : 0) };
+  };
+  const out = { all: pack(trades), bySymbol: {}, currency: account.currency || "", note: trades.length < 30 ? "Fewer than 30 trades - too early to judge the bot." : "" };
+  ["XAUUSD", "BTCUSD"].forEach((sy) => { out.bySymbol[sy] = pack(trades.filter((t) => t.symbol === sy)); });
+  return out;
 }
 
 function autoStatus() {
@@ -583,7 +606,17 @@ const server = http.createServer(async (req, res) => {
         open: rows(b.open).slice(0, 30).map((p) => ({ ticket: p[0], symbol: p[1], side: p[2], lots: num(p[3]), open: num(p[4]), sl: num(p[5]), tp: num(p[6]), price: num(p[7]), profit: num(p[8]) })),
         closed: rows(b.closed).slice(0, 20).map((p) => ({ ticket: p[0], symbol: p[1], side: p[2], lots: num(p[3]), price: num(p[4]), profit: num(p[5]), reason: p[6], time: p[7] }))
       };
+      let added = 0;
+      account.closed.forEach((c) => {
+        const key = c.ticket + "|" + c.time + "|" + c.profit;
+        if (!db.history.some((h) => h.key === key)) { db.history.push({ key, ticket: c.ticket, symbol: String(c.symbol || "").replace(/m$/i, "").toUpperCase(), side: c.side, profit: c.profit, reason: c.reason, time: c.time, login: account.login, at: Date.now() }); added++; }
+      });
+      if (added) { db.history = db.history.slice(-1000); save(); }
       return send(res, 200, { ok: true });
+    }
+
+    if (req.method === "GET" && route === "/stats") {
+      return send(res, 200, statsNow());
     }
 
     if (req.method === "GET" && route === "/positions") {

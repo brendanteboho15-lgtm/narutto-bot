@@ -4,7 +4,7 @@
 //| L99 standard: ASCII only, handle-free, no chart object clutter   |
 //+------------------------------------------------------------------+
 #property copyright "Narutto AfriQa Bot"
-#property version   "1.21"
+#property version   "1.30"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -26,6 +26,12 @@ input int    InpBarsH1          = 120;        // Candles sent: H1
 input int    InpBarsH4          = 80;        // Candles sent: H4
 input int    InpMaxPositions    = 3;         // Hard cap on open positions with this magic (0 = no cap)
 input double InpMinLotRiskCapPct = 0.0;      // Small accounts: if the risk-sized lot is below the broker minimum, trade the minimum lot only when it risks at most this % of balance (0 = off, max 3)
+
+input double InpBreakEvenAtR    = 1.0;       // Move stop to break-even once profit reaches this many R (0 = off). 1R = the original stop distance
+input double InpPartialPct      = 50.0;      // Close this % of the trade at InpPartialAtR (0 = off; skipped if lot is too small to split)
+input double InpPartialAtR      = 1.0;       // Partial close target in R
+input double InpTrailAtR        = 1.5;       // Start trailing the stop at this many R (0 = off)
+input double InpTrailDistR      = 1.0;       // Trailing stop distance in R
 
 CTrade g_trade;
 string g_handled[];
@@ -472,9 +478,90 @@ void OnDeinit(const int reason)
    Comment("");
 }
 
+//+------------------------------------------------------------------+
+//| Protect open trades: partial close, break-even, trailing stop     |
+//+------------------------------------------------------------------+
+void ManagePositions()
+{
+   if(InpBreakEvenAtR <= 0.0 && InpPartialPct <= 0.0 && InpTrailAtR <= 0.0)
+      return;
+   for(int i = PositionsTotal() - 1; i >= 0; i--)
+   {
+      ulong tk = PositionGetTicket(i);
+      if(tk == 0 || !PositionSelectByTicket(tk))
+         continue;
+      if(PositionGetInteger(POSITION_MAGIC) != InpMagic)
+         continue;
+      string sym  = PositionGetString(POSITION_SYMBOL);
+      long   pid  = PositionGetInteger(POSITION_IDENTIFIER);
+      bool   isBuy = (PositionGetInteger(POSITION_TYPE) == POSITION_TYPE_BUY);
+      double open = PositionGetDouble(POSITION_PRICE_OPEN);
+      double sl   = PositionGetDouble(POSITION_SL);
+      double tp   = PositionGetDouble(POSITION_TP);
+      double vol  = PositionGetDouble(POSITION_VOLUME);
+      string kr = "NBR_" + IntegerToString(pid);
+      string kp = "NBP_" + IntegerToString(pid);
+      double r = 0.0;
+      if(GlobalVariableCheck(kr))
+         r = GlobalVariableGet(kr);
+      else if(sl > 0.0)
+      {
+         r = MathAbs(open - sl);          // first time we see it: the stop is still the original one
+         GlobalVariableSet(kr, r);
+      }
+      if(r <= 0.0)
+         continue;
+      double bid = SymbolInfoDouble(sym, SYMBOL_BID);
+      double ask = SymbolInfoDouble(sym, SYMBOL_ASK);
+      double point = SymbolInfoDouble(sym, SYMBOL_POINT);
+      int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
+      if(bid <= 0.0 || ask <= 0.0 || point <= 0.0)
+         continue;
+      double gain = isBuy ? (bid - open) : (open - ask);
+      double minDist = (double)SymbolInfoInteger(sym, SYMBOL_TRADE_STOPS_LEVEL) * point + (ask - bid);
+      g_trade.SetExpertMagicNumber(InpMagic);
+
+      // 1) partial close
+      if(InpPartialPct > 0.0 && !GlobalVariableCheck(kp) && gain >= InpPartialAtR * r)
+      {
+         double step = SymbolInfoDouble(sym, SYMBOL_VOLUME_STEP);
+         double minLot = SymbolInfoDouble(sym, SYMBOL_VOLUME_MIN);
+         if(step <= 0.0) step = 0.01;
+         double part = MathFloor(vol * InpPartialPct / 100.0 / step) * step;
+         if(part >= minLot && (vol - part) >= minLot)
+         {
+            if(g_trade.PositionClosePartial(tk, NormalizeDouble(part, 2)))
+               Print("Partial close ", sym, " ", DoubleToString(part, 2), " lots at ", DoubleToString(InpPartialAtR, 1), "R");
+            GlobalVariableSet(kp, 1.0);
+            continue;                       // position changed - handle the rest next timer
+         }
+         GlobalVariableSet(kp, 1.0);         // too small to split: skip partial for this trade
+      }
+
+      // 2) break-even, 3) trailing: the stop only ever moves in the trade's favour
+      double newSl = 0.0;
+      if(InpBreakEvenAtR > 0.0 && gain >= InpBreakEvenAtR * r)
+         newSl = isBuy ? open + (ask - bid) : open - (ask - bid);
+      if(InpTrailAtR > 0.0 && gain >= InpTrailAtR * r)
+      {
+         double t = isBuy ? bid - InpTrailDistR * r : ask + InpTrailDistR * r;
+         if(newSl == 0.0 || (isBuy && t > newSl) || (!isBuy && t < newSl))
+            newSl = t;
+      }
+      if(newSl <= 0.0)
+         continue;
+      newSl = NormalizeDouble(newSl, digits);
+      bool better = (sl <= 0.0) || (isBuy ? newSl > sl + point : newSl < sl - point);
+      bool legal  = isBuy ? (bid - newSl >= minDist) : (newSl - ask >= minDist);
+      if(better && legal)
+         g_trade.PositionModify(tk, newSl, tp);
+   }
+}
+
 void OnTimer()
 {
    Poll();
+   ManagePositions();
    if(InpAutoScan && InpAllowTrading)
    {
       datetime cur = iTime(_Symbol, PERIOD_M5, 0);

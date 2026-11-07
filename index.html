@@ -238,6 +238,8 @@ nav button.on{color:var(--accent)}
       <button class="btn sm" id="btnAutoOn" style="flex:1">Turn ON</button>
       <button class="btn grey sm" id="btnAutoOff" style="flex:1;border:1px solid var(--red2);color:var(--red)">STOP</button>
     </div>
+    <div class="meta" style="margin-top:14px"><b style="color:var(--text)">Scoreboard (closed trades)</b></div>
+    <div class="meta" id="statsBox">Loading...</div>
     <div class="meta" style="margin-top:12px">Auto decisions (newest first)</div>
     <div id="autoLog"><div class="meta">Nothing yet.</div></div>
     <div class="meta">Not financial advice. AI can be wrong. Use a demo account first.</div>
@@ -535,6 +537,19 @@ function renderAuto(a){
     box.appendChild(d2);
   });
 }
+var statsN = 0;
+function renderStats(x){
+  var a = x.all || {}, cur = esc(x.currency || "");
+  function line(n, p){ return '<br><b style="color:var(--text)">' + n + '</b>: ' + esc(p.trades) + ' trades &middot; ' + esc(p.wins) + ' W / ' + esc(p.losses) + ' L &middot; win rate ' + (p.winRate == null ? "-" : esc(p.winRate) + "%") + ' &middot; net ' + esc(p.net) + ' ' + cur; }
+  var h = a.trades ? line("All", a).slice(4) : "No closed trades yet.";
+  if (a.trades){
+    h += '<br>Avg win ' + esc(a.avgWin) + ' &middot; avg loss ' + esc(a.avgLoss) + ' &middot; profit factor ' + (a.profitFactor == null ? "-" : esc(a.profitFactor));
+    var b = x.bySymbol || {}; Object.keys(b).forEach(function(k){ if (b[k].trades) h += line(k, b[k]); });
+  }
+  if (x.note) h += '<br><span style="color:var(--amber)">' + esc(x.note) + '</span>';
+  $("statsBox").innerHTML = h;
+}
+function loadStats(){ if (!S.bridge || !S.token) return; bridgeReq("/stats").then(renderStats).catch(function(){}); }
 var stInit = false;
 function fillSettings(L){
   $("stSniper").value = L.sniper === false ? "0" : "1";
@@ -550,7 +565,7 @@ $("btnStSave").onclick = function(){
 $("btnStReset").onclick = function(){
   autoPost({ resetDay: 1 }).then(function(a){ renderAuto(a); toast("Today's limit reset"); }).catch(function(e){ toast(e.message || e); });
 };
-function loadAuto(){ if (!S.bridge || !S.token) return; bridgeReq("/auto").then(renderAuto).catch(function(e){ $("autoInfo").textContent = "Could not reach the bridge: " + (e.message || e); }); }
+function loadAuto(){ if (!S.bridge || !S.token) return; if (statsN++ % 8 === 0) loadStats(); bridgeReq("/auto").then(renderAuto).catch(function(e){ $("autoInfo").textContent = "Could not reach the bridge: " + (e.message || e); }); }
 $("btnAutoOn").onclick = function(){
   if (!confirm("Turn ON auto-trade?\n\nThe bot will place real orders on the MT5 account the EA is attached to, by itself, using the risk limits shown. Use a DEMO account first.")) return;
   autoPost({ enabled: 1 }).then(function(a){ renderAuto(a); toast("Auto-trade ON"); log("Auto-trade ON"); }).catch(function(e){ toast(e.message || e); });
