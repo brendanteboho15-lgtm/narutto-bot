@@ -4,7 +4,7 @@
 //| L99 standard: ASCII only, handle-free, no chart object clutter   |
 //+------------------------------------------------------------------+
 #property copyright "Narutto AfriQa Bot"
-#property version   "1.40"
+#property version   "1.50"
 #property strict
 
 #include <Trade/Trade.mqh>
@@ -146,7 +146,8 @@ int CountMyPositions()
 //| Validate and execute a signal                                    |
 //+------------------------------------------------------------------+
 bool Execute(const string sym, const string side, const double entry, const double sl,
-             const double tp, const double lotsIn, const double riskPct, ulong &ticket, double &fill, string &msg)
+             const double tp, const double lotsIn, const double riskPct, ulong &ticket, double &fill, string &msg,
+             const int groupN = 1, const double groupCapPct = 0.0)
 {
    ticket = 0;
    fill   = 0.0;
@@ -161,9 +162,10 @@ bool Execute(const string sym, const string side, const double entry, const doub
       msg = "Symbol not found: " + sym;
       return(false);
    }
-   if(InpMaxPositions > 0 && CountMyPositions() >= InpMaxPositions)
+   int posCap = InpMaxPositions + (groupN > 1 ? groupN - 1 : 0);     // a multi-trade signal may need several slots
+   if(InpMaxPositions > 0 && CountMyPositions() >= posCap)
    {
-      msg = "EA position cap reached (" + IntegerToString(InpMaxPositions) + ")";
+      msg = "EA position cap reached (" + IntegerToString(posCap) + ")";
       return(false);
    }
 
@@ -270,6 +272,24 @@ bool Execute(const string sym, const string side, const double entry, const doub
       }
    }
    lots = NormalizeDouble(lots, 2);
+
+   // total-risk cap for multi-trade signals: all parts together must stay under the cap
+   if(groupN > 1 && groupCapPct > 0.0)
+   {
+      double tsz = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_SIZE);
+      double tvl = SymbolInfoDouble(sym, SYMBOL_TRADE_TICK_VALUE);
+      double bal2 = AccountInfoDouble(ACCOUNT_BALANCE);
+      if(tsz > 0.0 && tvl > 0.0 && bal2 > 0.0)
+      {
+         double partPct = lots * (MathAbs(price - sl) / tsz * tvl) / bal2 * 100.0;
+         if(partPct * groupN > groupCapPct + 0.0001)
+         {
+            msg = "Total risk of " + IntegerToString(groupN) + " trades would be " + DoubleToString(partPct * groupN, 2)
+                + "% of balance, over your " + DoubleToString(groupCapPct, 2) + "% cap. Use fewer trades or smaller lots.";
+            return(false);
+         }
+      }
+   }
 
    int digits = (int)SymbolInfoInteger(sym, SYMBOL_DIGITS);
    double nsl = NormalizeDouble(sl, digits);
@@ -420,7 +440,7 @@ void SendCandles()
 }
 
 //+------------------------------------------------------------------+
-void Poll()
+bool Poll()
 {
    string resp;
    int code = Http("GET", "/pending", "", resp);
@@ -428,7 +448,7 @@ void Poll()
    {
       g_failStreak++;
       Comment("Narutto Bridge: OFFLINE (", code, ") ", resp);
-      return;
+      return(false);
    }
    g_failStreak = 0;
    Comment("Narutto Bridge: ONLINE  trading=", (InpAllowTrading ? "ON" : "OFF"), "  candles=", (InpAutoScan ? "ON" : "OFF"));
@@ -438,20 +458,20 @@ void Poll()
    if(StringLen(resp) == 0)
    {
       SendPositions();
-      return;
+      return(false);
    }
 
    string p[];
    int np = StringSplit(resp, '|', p);
-   if(np != 7 && np != 8)
+   if(np != 7 && np != 8 && np != 10)
    {
       Print("Narutto: malformed signal: ", resp);
-      return;
+      return(false);
    }
 
    string id   = p[0];
    if(WasHandled(id))
-      return;
+      return(false);
    MarkHandled(id);
 
    string sym   = p[1] + InpSymbolSuffix;
@@ -460,15 +480,18 @@ void Poll()
    double sl    = StringToDouble(p[4]);
    double tp    = StringToDouble(p[5]);
    double lots  = StringToDouble(p[6]);
-   double riskP = (np == 8) ? StringToDouble(p[7]) : 0.0;
+   double riskP = (np >= 8) ? StringToDouble(p[7]) : 0.0;
+   int    grpN  = (np == 10) ? (int)StringToInteger(p[8]) : 1;
+   double grpCap = (np == 10) ? StringToDouble(p[9]) : 0.0;
 
    ulong  ticket;
    double fill;
    string msg;
-   bool ok = Execute(sym, side, entry, sl, tp, lots, riskP, ticket, fill, msg);
+   bool ok = Execute(sym, side, entry, sl, tp, lots, riskP, ticket, fill, msg, grpN, grpCap);
    Print("Narutto: ", id, " ", sym, " ", side, " -> ", msg);
    Report(id, ok, ticket, fill, msg);
    SendPositions();
+   return(true);
 }
 
 //+------------------------------------------------------------------+
@@ -733,7 +756,8 @@ void MomentumTick()
 
 void OnTimer()
 {
-   Poll();
+   int polled = 0;
+   while(Poll() && ++polled < 6) {}      // several trades from one signal are fetched back to back
    ManagePositions();
    if(InpMomentum && InpAllowTrading)
       MomentumTick();

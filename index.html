@@ -218,6 +218,12 @@ nav button.on{color:var(--accent)}
     <div class="meta" style="margin-top:14px"><b style="color:var(--text)">Trade settings</b></div>
     <label>Entry quality</label>
     <select id="stSniper"><option value="1">Sniper (strict - trades only A+ setups)</option><option value="0">Normal (trades more, weaker setups)</option></select>
+    <label>Direction</label>
+    <select id="stDir"><option value="both">Both (buy and sell)</option><option value="buy">Buy only</option><option value="sell">Sell only</option></select>
+    <label>Trades per signal (1-6)</label>
+    <input id="stParts" type="number" step="1" min="1" max="6" inputmode="numeric" placeholder="1">
+    <label>Max total risk per signal % (used when 2+ trades)</label>
+    <input id="stGroup" type="number" step="0.5" min="0.5" max="20" inputmode="decimal" placeholder="5">
     <label>Lot size mode</label>
     <select id="stLotMode"><option value="fixed">Fixed lot size (I choose)</option><option value="risk">Auto lot size (% risk)</option></select>
     <label>Lot size (fixed mode)</label>
@@ -238,6 +244,8 @@ nav button.on{color:var(--accent)}
       <button class="btn sm" id="btnAutoOn" style="flex:1">Turn ON</button>
       <button class="btn grey sm" id="btnAutoOff" style="flex:1;border:1px solid var(--red2);color:var(--red)">STOP</button>
     </div>
+    <div id="stageBox" style="margin-top:14px"></div>
+    <div id="sigCard" style="margin-top:10px"></div>
     <div class="meta" style="margin-top:14px"><b style="color:var(--text)">Scoreboard (closed trades)</b></div>
     <div class="meta" id="statsBox">Loading...</div>
     <div class="meta" style="margin-top:12px">Auto decisions (newest first)</div>
@@ -526,9 +534,10 @@ function renderAuto(a){
   else if (d.halted) warn = d.halted;
   if (!stInit && a.limits){ stInit = true; fillSettings(L); }
   $("autoInfo").innerHTML = '<b style="color:var(--text)">' + (on ? "Auto is ON" : "Auto is OFF") + '</b> &middot; ' + esc(a.mode) + ' mode &middot; ' + esc((a.symbols || []).join(", ")) +
-    '<br>' + (L.sniper === false ? 'Normal mode' : '<b style="color:var(--green)">Sniper mode</b>') + ' &middot; ' + (L.lotMode === "fixed" ? esc(L.fixedLots) + ' lots per trade' : 'Risk ' + esc(L.riskPct) + '% per trade') + ' &middot; max ' + esc(L.maxOpen) + ' open &middot; max ' + esc(L.maxTradesDay) + ' per day &middot; ' + (L.dailyLossPct > 0 ? 'stops at -' + esc(L.dailyLossPct) + '% for the day' : 'no daily loss stop') +
+    '<br>' + (L.sniper === false ? 'Normal mode' : '<b style="color:var(--green)">Sniper mode</b>') + ' &middot; ' + (L.lotMode === "fixed" ? esc(L.fixedLots) + ' lots per trade' : 'Risk ' + esc(L.riskPct) + '% per trade') + ' &middot; ' + (L.direction && L.direction !== "both" ? esc(L.direction) + ' only &middot; ' : '') + (L.parts > 1 ? esc(L.parts) + ' trades per signal (cap ' + esc(L.groupRiskPct) + '% total risk) &middot; ' : '') + 'max ' + esc(L.maxOpen) + ' open &middot; max ' + esc(L.maxTradesDay) + ' per day &middot; ' + (L.dailyLossPct > 0 ? 'stops at -' + esc(L.dailyLossPct) + '% for the day' : 'no daily loss stop') +
     '<br>Today: ' + esc(d.scans) + ' scans &middot; ' + esc(d.trades) + ' trades &middot; day P/L ' + esc((-d.lossPct || 0).toFixed(2)) + '%' +
     (warn ? '<br><span style="color:var(--amber)">' + esc(warn) + '</span>' : "");
+  renderStage(a);
   var box = $("autoLog"); box.innerHTML = (a.log || []).length ? "" : '<div class="meta">Nothing yet.</div>';
   (a.log || []).forEach(function(e){
     var col = e.result === "TRADE" || e.result === "ON" || e.result === "NOW" ? "var(--green)" : e.result === "ERROR" || e.result === "STOP" ? "var(--red)" : "var(--mute)";
@@ -536,6 +545,19 @@ function renderAuto(a){
     d2.innerHTML = '<b style="color:' + col + '">' + esc(e.result) + '</b> ' + esc(e.symbol) + ' &middot; ' + esc(ago(e.t)) + '<br>' + esc(e.msg);
     box.appendChild(d2);
   });
+}
+function renderStage(a){
+  var st = a.stage || {step: 0, label: ""}, names = ["Analyse", "Signal", "Execute"], h = '<div style="display:flex;gap:6px">';
+  names.forEach(function(n, i){
+    var on = st.step === i + 1, done = st.step > i + 1;
+    h += '<div style="flex:1;text-align:center;padding:8px 4px;border-radius:10px;font-size:12px;font-weight:700;background:' + (on ? "var(--accent,#f2923a)" : done ? "rgba(46,204,113,.25)" : "rgba(255,255,255,.06)") + ';color:' + (on ? "#1a1a1a" : done ? "var(--green)" : "var(--mute)") + '">' + n + '</div>';
+  });
+  $("stageBox").innerHTML = h + '</div><div class="meta" style="margin-top:6px">' + esc(st.label || "") + '</div>';
+  var s = a.lastSignal;
+  $("sigCard").innerHTML = s && s.side ? '<div style="padding:12px;border-radius:14px;background:rgba(255,255,255,.05)"><div class="meta">AI TRADE ANALYSIS &middot; ' + esc(ago(s.t)) + '</div>' +
+    '<div style="font-size:20px;font-weight:800;color:' + (s.side === "BUY" ? "var(--green)" : "var(--red)") + ';margin:4px 0">' + esc(s.symbol) + ' ' + esc(s.side) + (s.parts > 1 ? ' &times; ' + esc(s.parts) : '') + '</div>' +
+    '<div>Entry ' + esc(s.entry) + ' &middot; SL ' + esc(s.sl) + ' &middot; TP ' + esc(s.tp) + '</div>' +
+    '<div class="meta">' + esc(s.conf) + '% confidence &middot; RR ' + esc(s.rr) + (s.note ? ' &middot; ' + esc(s.note) : '') + '</div></div>' : "";
 }
 var statsN = 0;
 function renderStats(x){
@@ -554,11 +576,12 @@ function loadStats(){ if (!S.bridge || !S.token) return; bridgeReq("/stats").the
 var stInit = false;
 function fillSettings(L){
   $("stSniper").value = L.sniper === false ? "0" : "1";
+  $("stDir").value = L.direction || "both"; $("stParts").value = L.parts || 1; $("stGroup").value = L.groupRiskPct || 5;
   $("stLotMode").value = L.lotMode || "risk"; $("stLots").value = L.fixedLots; $("stRisk").value = L.riskPct;
   $("stMaxOpen").value = L.maxOpen; $("stMaxDay").value = L.maxTradesDay; $("stLoss").value = L.dailyLossPct;
 }
 $("btnStSave").onclick = function(){
-  var st = { sniper: $("stSniper").value === "1", lotMode: $("stLotMode").value, fixedLots: parseFloat($("stLots").value), riskPct: parseFloat($("stRisk").value),
+  var st = { direction: $("stDir").value, parts: parseInt($("stParts").value, 10), groupRiskPct: parseFloat($("stGroup").value), sniper: $("stSniper").value === "1", lotMode: $("stLotMode").value, fixedLots: parseFloat($("stLots").value), riskPct: parseFloat($("stRisk").value),
     maxOpen: parseInt($("stMaxOpen").value, 10), maxTradesDay: parseInt($("stMaxDay").value, 10), dailyLossPct: parseFloat($("stLoss").value) };
   Object.keys(st).forEach(function(k){ if (typeof st[k] === "number" && !isFinite(st[k])) delete st[k]; });
   autoPost({ settings: st }).then(function(a){ stInit = false; renderAuto(a); toast("Settings saved"); }).catch(function(e){ toast(e.message || e); });

@@ -114,9 +114,15 @@ function applySettings(st) {
   if ((v = n(st.maxOpen, 1, 10)) !== null) A.maxOpen = Math.round(v);
   if ((v = n(st.maxTradesDay, 1, 50)) !== null) A.maxTradesDay = Math.round(v);
   if ((v = n(st.dailyLossPct, 0, 10)) !== null) A.dailyLoss = v;
+  if (st.direction === "buy" || st.direction === "sell" || st.direction === "both") A.direction = st.direction;
+  if ((v = n(st.parts, 1, 6)) !== null) A.parts = Math.round(v);
+  if ((v = n(st.groupRiskPct, 0.5, 20)) !== null) A.groupCap = v;
   if (st.sniper === true || st.sniper === false || st.sniper === 1 || st.sniper === 0) A.sniper = !!st.sniper;
 }
 A.sniper = A.sniper !== false;
+A.direction = A.direction || "both";
+A.parts = A.parts || 1;
+A.groupCap = A.groupCap || 5;
 applySettings(db.auto.settings);
 
 const lastScan = {};
@@ -135,7 +141,7 @@ function dayRec() {
 function autoTradesToday() {
   const t = today();
   return db.signals.filter((s) => (s.source === "auto" || s.source === "now") && new Date(s.created).toISOString().slice(0, 10) === t &&
-    ["queued", "sent", "filled"].indexOf(s.status) >= 0).length;
+    ["queued", "sent", "filled"].indexOf(s.status) >= 0).map((s) => s.grp || s.id).filter((g, i, arr) => arr.indexOf(g) === i).length;
 }
 function logAuto(symbol, result, msg, extra) {
   db.auto.log.push(Object.assign({ t: Date.now(), symbol: symbol || "", result, msg: String(msg || "").slice(0, 240) }, extra || {}));
@@ -168,7 +174,7 @@ function gates(symbol, b) {
   }
   const age = num(b.age);
   if (!Number.isFinite(age) || age > 1500) return "Market closed or chart data stale";
-  if (account.open.length >= A.maxOpen) return "Max open trades reached (" + A.maxOpen + ")";
+  if (account.open.length >= A.maxOpen * A.parts) return "Max open trades reached (" + A.maxOpen * A.parts + ")";
   if (db.signals.some((s) => s.status === "queued" || s.status === "sent")) return "An order is still being placed";
   if (autoTradesToday() >= A.maxTradesDay) return "Max trades for today reached (" + A.maxTradesDay + ")";
   const recent = db.signals.filter((s) => s.source === "auto" && s.symbol === symbol && s.status !== "failed" && s.status !== "expired").pop();
@@ -265,7 +271,7 @@ function judge(j, q, minConf, rrMin, b) {
   if (!(conf >= need)) return { ok: false, why: "Confidence " + (Number.isFinite(conf) ? conf : "?") + " below " + need };
   if (aiEntry > 0 && Math.abs(aiEntry - price) > 0.5 * risk) return { ok: false, why: "Price already moved away from the AI entry" };
   if (b) { const why = sniperCheck(sig, b, price, sl); if (why) return { ok: false, why: "Sniper filter: " + why }; }
-  return { ok: true, side: sig, entry: price, sl, tp, rr, conf };
+  return { ok: true, side: sig, entry: price, sl, tp, rr, conf, note: String((Array.isArray(j.reasons) && j.reasons[0]) || "").replace(/[|\r\n]/g, " ").slice(0, 140) };
 }
 
 async function runAutoScan(symbol, b, force) {
@@ -280,12 +286,22 @@ async function runAutoScan(symbol, b, force) {
   const v = sn ? judge(j, q, Math.max(A.minConf, 70), Math.max(A.minRR, 2), b) : judge(j, q, force ? 35 : undefined);
   if (!v.ok) { logAuto(symbol, "WAIT", v.why); return; }
   if (!force && !db.auto.enabled) { logAuto(symbol, "SKIP", "Auto was switched off during the scan"); return; }
-  const id = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
+  if (A.direction !== "both" && v.side.toLowerCase() !== A.direction) { logAuto(symbol, "SKIP", "Direction filter: only " + A.direction.toUpperCase() + " trades allowed (AI wanted " + v.side + ")"); return; }
+  const grp = Date.now().toString(36) + Math.random().toString(36).slice(2, 6);
   const fixed = A.lotMode === "fixed";
-  db.signals.push({ id, symbol, side: v.side, entry: v.entry, sl: v.sl, tp: v.tp, lots: fixed ? A.fixedLots : 0, risk: fixed ? 0 : A.risk, source: force ? "now" : "auto",
-    status: "queued", created: Date.now(), msg: "AI auto, conf " + v.conf + ", RR " + v.rr.toFixed(2) });
-  logAuto(symbol, "TRADE", (force ? "NOW  " : "") + v.side + " queued  entry " + v.entry + "  SL " + v.sl + "  TP " + v.tp + "  RR " + v.rr.toFixed(2) + "  conf " + v.conf,
-    { side: v.side, entry: v.entry, sl: v.sl, tp: v.tp });
+  const N = Math.max(1, A.parts);
+  const dirn = v.side === "BUY" ? 1 : -1, full = Math.abs(v.tp - v.entry);
+  const dec = v.entry > 1000 ? 2 : 5;
+  for (let i = 0; i < N; i++) {
+    // staggered take-profits: the first parts bank profit early, the last part runs to the full target
+    const frac = N === 1 ? 1 : 0.4 + 0.6 * i / (N - 1);
+    const tpi = Math.round((v.entry + dirn * full * frac) * Math.pow(10, dec)) / Math.pow(10, dec);
+    db.signals.push({ id: grp + (N > 1 ? "p" + (i + 1) : ""), grp, part: i + 1, parts: N, symbol, side: v.side, entry: v.entry, sl: v.sl, tp: tpi,
+      lots: fixed ? A.fixedLots : 0, risk: fixed ? 0 : A.risk / N, groupCap: N > 1 ? A.groupCap : 0, source: force ? "now" : "auto",
+      status: "queued", created: Date.now(), msg: "AI auto, conf " + v.conf + ", RR " + v.rr.toFixed(2) + (N > 1 ? ", part " + (i + 1) + "/" + N : "") });
+  }
+  logAuto(symbol, "TRADE", (force ? "NOW  " : "") + v.side + " queued" + (N > 1 ? " x" + N + " trades" : "") + "  entry " + v.entry + "  SL " + v.sl + "  TP " + v.tp + "  RR " + v.rr.toFixed(2) + "  conf " + v.conf,
+    { side: v.side, entry: v.entry, sl: v.sl, tp: v.tp, conf: v.conf, rr: Math.round(v.rr * 100) / 100, parts: N, note: v.note, grp });
 }
 
 const lastCandles = {};
@@ -321,7 +337,7 @@ function tradeNow() {
   const acctAge = account.ts ? Date.now() - account.ts : Infinity;
   if (acctAge > 90000) return { started, blocked: [{ symbol: "all", why: "No fresh account data from the EA (is MT5 open?)" }] };
   A.symbols.forEach((symbol) => {
-    if (account.open.length + started.length >= A.maxOpen) { blocked.push({ symbol, why: "Max open trades reached (" + A.maxOpen + ") - raise it in Settings" }); return; }
+    if (account.open.length + started.length * A.parts >= A.maxOpen * A.parts) { blocked.push({ symbol, why: "Max open trades reached (" + A.maxOpen * A.parts + ") - raise it in Settings" }); return; }
     const c = lastCandles[symbol];
     if (!c || Date.now() - c.ts > 240000) { blocked.push({ symbol, why: "No fresh chart data. Attach the EA to a " + symbol + " chart in MT5." }); return; }
     const age = num(c.b.age);
@@ -365,12 +381,24 @@ function autoStatus() {
   const lossPct = day.startBalance > 0 && account.equity > 0 ? (day.startBalance - account.equity) / day.startBalance * 100 : 0;
   return {
     enabled: !!db.auto.enabled, hasKey: !!API_KEY, mode: A.mode, model: A.model, symbols: A.symbols,
-    limits: { sniper: A.sniper, lotMode: A.lotMode, fixedLots: A.fixedLots, riskPct: A.risk, maxOpen: A.maxOpen, maxTradesDay: A.maxTradesDay, dailyLossPct: A.dailyLoss, minConf: A.minConf, minRR: A.minRR, scanEveryMin: A.scanEveryMin, maxScansDay: A.maxScansDay },
+    limits: { direction: A.direction, parts: A.parts, groupRiskPct: A.groupCap, sniper: A.sniper, lotMode: A.lotMode, fixedLots: A.fixedLots, riskPct: A.risk, maxOpen: A.maxOpen, maxTradesDay: A.maxTradesDay, dailyLossPct: A.dailyLoss, minConf: A.minConf, minRR: A.minRR, scanEveryMin: A.scanEveryMin, maxScansDay: A.maxScansDay },
     day: { date: day.date, scans: day.scans, trades: autoTradesToday(), lossPct: Math.round(lossPct * 100) / 100, halted: A.dailyLoss > 0 ? (day.halted || "") : "" },
     login: account.login || "",
     eaAgeSec: account.ts ? Math.round((Date.now() - account.ts) / 1000) : null,
+    stage: stageNow(),
+    lastSignal: (db.auto.log.slice().reverse().find((e) => e.result === "TRADE") || null),
     log: db.auto.log.slice(-15).reverse()
   };
+}
+function stageNow() {
+  // 1 = Analyse, 2 = Signal (waiting for MT5), 3 = Execute (done), 0 = idle
+  const sym = Object.keys(scanning).filter((k) => scanning[k]);
+  if (sym.length) return { step: 1, label: "Analysing " + sym.join(", ") + "..." };
+  const recent = db.signals.filter((x) => Date.now() - x.created < 120000 && (x.source === "auto" || x.source === "now"));
+  if (!recent.length) return { step: 0, label: "Waiting for the next scan" };
+  if (recent.some((x) => x.status === "queued" || x.status === "sent")) return { step: 2, label: "Signal found - sending to MT5" };
+  const filled = recent.filter((x) => x.status === "filled").length;
+  return filled ? { step: 3, label: "Executed " + filled + " trade" + (filled > 1 ? "s" : "") } : { step: 0, label: "Last order did not fill - see the list below" };
 }
 
 /* ---------- Auto scan (EA sends chart screenshots, bridge asks Claude) ---------- */
@@ -541,7 +569,7 @@ const server = http.createServer(async (req, res) => {
       s.status = "sent";
       save();
       const f = [s.id, s.symbol, s.side, s.entry, s.sl, s.tp, s.lots];
-      if (s.source === "auto" || s.source === "now") f.push(s.risk);          // 8th field: risk % (EA sizes the lots)
+      if (s.source === "auto" || s.source === "now") { f.push(s.risk); f.push(s.parts || 1); f.push(s.groupCap || 0); }   // 8th: risk %, 9th: trades in this signal, 10th: total risk cap %
       return send(res, 200, f.join("|"), "text/plain");
     }
 
@@ -569,7 +597,7 @@ const server = http.createServer(async (req, res) => {
       } else if (b.settings && typeof b.settings === "object") {
         db.auto.settings = Object.assign(db.auto.settings || {}, b.settings);
         applySettings(b.settings);
-        logAuto("", "SET", "Settings saved: " + (A.sniper ? "SNIPER on, " : "sniper off, ") + (A.lotMode === "fixed" ? A.fixedLots + " lots" : A.risk + "% risk") + ", max open " + A.maxOpen + ", max/day " + A.maxTradesDay + ", daily loss " + (A.dailyLoss > 0 ? A.dailyLoss + "%" : "OFF"));
+        logAuto("", "SET", "Settings saved: " + (A.sniper ? "SNIPER on, " : "sniper off, ") + (A.lotMode === "fixed" ? A.fixedLots + " lots" : A.risk + "% risk") + ", " + A.direction + " x" + A.parts + ", max open " + A.maxOpen + ", max/day " + A.maxTradesDay + ", daily loss " + (A.dailyLoss > 0 ? A.dailyLoss + "%" : "OFF"));
       } else if (b.enabled !== undefined) {
         const on = String(b.enabled) === "1" || String(b.enabled) === "true";
         if (on && !API_KEY) return send(res, 400, { error: "Server has no ANTHROPIC_API_KEY - add it on Render first" });
