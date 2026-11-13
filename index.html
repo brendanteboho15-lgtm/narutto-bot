@@ -242,7 +242,7 @@ nav button.on{color:var(--accent)}
     </div>
     <div style="display:flex;gap:10px;margin-top:12px">
       <button class="btn sm" id="btnAutoOn" style="flex:1">Turn ON</button>
-      <button class="btn grey sm" id="btnAutoOff" style="flex:1;border:1px solid var(--red2);color:var(--red)">STOP</button>
+      <button class="btn grey sm" id="btnAutoOff" style="flex:1;border:1px solid var(--red2);color:var(--red)">EMERGENCY STOP</button>
     </div>
     <div id="stageBox" style="margin-top:14px"></div>
     <div id="sigCard" style="margin-top:10px"></div>
@@ -531,6 +531,7 @@ function renderAuto(a){
   var warn = "";
   if (!a.hasKey) warn = "Server has no ANTHROPIC_API_KEY yet (add it on Render).";
   else if (a.eaAgeSec == null || a.eaAgeSec > 90) warn = "EA is not sending data. Check MT5 is open and the EA is attached.";
+  else if (a.estop) warn = "EMERGENCY STOP is active - no new trades. Press Turn ON to resume.";
   else if (d.halted) warn = d.halted;
   if (!stInit && a.limits){ stInit = true; fillSettings(L); }
   $("autoInfo").innerHTML = '<b style="color:var(--text)">' + (on ? "Auto is ON" : "Auto is OFF") + '</b> &middot; ' + esc(a.mode) + ' mode &middot; ' + esc((a.symbols || []).join(", ")) +
@@ -606,7 +607,7 @@ $("btnNow").onclick = function(){
   }).catch(function(e){ toast(e.message || e); }).then(function(){ setTimeout(function(){ btn.disabled = false; btn.innerHTML = "&#9889; Trade NOW (BTC + Gold)"; }, 6000); });
 };
 $("btnAutoOff").onclick = function(){
-  autoPost({ panic: 1 }).then(function(a){ renderAuto(a); toast("Auto-trade STOPPED"); log("Auto-trade STOPPED"); }).catch(function(e){ toast(e.message || e); });
+  autoPost({ panic: 1 }).then(function(a){ renderAuto(a); toast("EMERGENCY STOP: all new trades blocked. Press Turn ON to resume."); log("EMERGENCY STOP"); }).catch(function(e){ toast(e.message || e); });
 };
 
 var posTick = 0;

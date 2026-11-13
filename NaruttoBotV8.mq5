@@ -59,6 +59,7 @@ bool     g_sigOk   = true;
 datetime g_sigTime = 0;
 const string NB8P  = "NB8_";
 const string NB8_STOPKEY = "NB8_EMERGENCY_STOP";
+const string NB8_PHONEKEY = "NB8_PHONE_STOP";
 const color  C_BG   = C'10,10,10';
 const color  C_OR   = C'255,140,0';
 const color  C_GOLD = C'255,200,40';
@@ -69,7 +70,9 @@ const color  C_DN   = C'255,85,85';
 
 bool IsStopped()
 {
-   return(GlobalVariableCheck(NB8_STOPKEY) && GlobalVariableGet(NB8_STOPKEY) > 0.5);
+   if(GlobalVariableCheck(NB8_STOPKEY) && GlobalVariableGet(NB8_STOPKEY) > 0.5)
+      return(true);
+   return(GlobalVariableCheck(NB8_PHONEKEY) && GlobalVariableGet(NB8_PHONEKEY) > 0.5);
 }
 datetime g_lastMomBar = 0;
 string g_handled[];
@@ -415,6 +418,11 @@ void SendPositions()
                + "&login=" + IntegerToString((long)AccountInfoInteger(ACCOUNT_LOGIN));
    string resp;
    Http("POST", "/positions", body, resp);
+   // the phone app EMERGENCY STOP travels back in this reply
+   if(StringFind(resp, "\"estop\":true") >= 0)
+      GlobalVariableSet(NB8_PHONEKEY, 1.0);
+   else if(StringFind(resp, "\"estop\":false") >= 0)
+      GlobalVariableSet(NB8_PHONEKEY, 0.0);
 }
 
 //+------------------------------------------------------------------+
@@ -747,6 +755,8 @@ void OnChartEvent(const int id, const long &lparam, const double &dparam, const 
    ObjectSetInteger(0, sparam, OBJPROP_STATE, false);
    bool nowStopped = !IsStopped();
    GlobalVariableSet(NB8_STOPKEY, nowStopped ? 1.0 : 0.0);
+   if(!nowStopped)
+      GlobalVariableSet(NB8_PHONEKEY, 0.0);      // resuming on the chart also clears a phone stop until the app says otherwise
    Print("Narutto V8: emergency stop ", nowStopped ? "ON - no new trades" : "OFF - trading resumed");
    if(nowStopped && InpStopClosesAll)
       CloseAllMine();

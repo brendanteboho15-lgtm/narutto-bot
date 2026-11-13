@@ -1,5 +1,5 @@
 // App-shell cache only. API and bridge calls always go to the network.
-const CACHE = "narutto-shell-v3";
+const CACHE = "narutto-shell-v4";
 const SHELL = ["./", "./index.html", "./manifest.webmanifest", "./icon-192.png", "./icon-512.png", "./avatar.png", "./poster.jpg"];
 
 self.addEventListener("install", (e) => {

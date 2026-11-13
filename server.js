@@ -333,6 +333,7 @@ function lossHalt() {
 // Trade NOW: user pressed the button. One scan per symbol that has fresh candles.
 function tradeNow() {
   const started = [], blocked = [];
+  if (db.auto.estop) return { started, blocked: [{ symbol: "all", why: "EMERGENCY STOP is active - press Turn ON to resume" }] };
   if (!API_KEY) return { started, blocked: [{ symbol: "all", why: "Server has no ANTHROPIC_API_KEY" }] };
   const acctAge = account.ts ? Date.now() - account.ts : Infinity;
   if (acctAge > 90000) return { started, blocked: [{ symbol: "all", why: "No fresh account data from the EA (is MT5 open?)" }] };
@@ -380,7 +381,7 @@ function autoStatus() {
   const day = dayRec();
   const lossPct = day.startBalance > 0 && account.equity > 0 ? (day.startBalance - account.equity) / day.startBalance * 100 : 0;
   return {
-    enabled: !!db.auto.enabled, hasKey: !!API_KEY, mode: A.mode, model: A.model, symbols: A.symbols,
+    enabled: !!db.auto.enabled, estop: !!db.auto.estop, hasKey: !!API_KEY, mode: A.mode, model: A.model, symbols: A.symbols,
     limits: { direction: A.direction, parts: A.parts, groupRiskPct: A.groupCap, sniper: A.sniper, lotMode: A.lotMode, fixedLots: A.fixedLots, riskPct: A.risk, maxOpen: A.maxOpen, maxTradesDay: A.maxTradesDay, dailyLossPct: A.dailyLoss, minConf: A.minConf, minRR: A.minRR, scanEveryMin: A.scanEveryMin, maxScansDay: A.maxScansDay },
     day: { date: day.date, scans: day.scans, trades: autoTradesToday(), lossPct: Math.round(lossPct * 100) / 100, halted: A.dailyLoss > 0 ? (day.halted || "") : "" },
     login: account.login || "",
@@ -588,8 +589,9 @@ const server = http.createServer(async (req, res) => {
       const b = parseBody(await readBody(req), req.headers["content-type"]);
       if (String(b.panic) === "1") {                     // kill switch: off + cancel anything waiting
         db.auto.enabled = false;
+        db.auto.estop = true;                            // the EA reads this and refuses every new trade, including Momentum
         db.signals.forEach((x) => { if (x.status === "queued") { x.status = "cancelled"; x.msg = "Cancelled by STOP"; } });
-        logAuto("", "STOP", "Auto switched off (STOP pressed)");
+        logAuto("", "STOP", "EMERGENCY STOP: auto off, queued orders cancelled, EA locked until you press Turn ON");
       } else if (String(b.resetDay) === "1") {          // clear the daily limit and start the day from the current equity
         db.auto.day = { date: today(), startBalance: account.equity || 0, scans: 0, halted: "", login: account.login || "" };
         Object.keys(lastSkip).forEach((k) => { lastSkip[k] = ""; });
@@ -602,6 +604,7 @@ const server = http.createServer(async (req, res) => {
         const on = String(b.enabled) === "1" || String(b.enabled) === "true";
         if (on && !API_KEY) return send(res, 400, { error: "Server has no ANTHROPIC_API_KEY - add it on Render first" });
         db.auto.enabled = on;
+        if (on) db.auto.estop = false;
         if (on) Object.keys(lastSkip).forEach((k) => { lastSkip[k] = ""; });
         logAuto("", on ? "ON" : "OFF", "Auto switched " + (on ? "ON" : "OFF") + " from the app");
       }
@@ -641,7 +644,7 @@ const server = http.createServer(async (req, res) => {
         if (!db.history.some((h) => h.key === key)) { db.history.push({ key, ticket: c.ticket, symbol: String(c.symbol || "").replace(/m$/i, "").toUpperCase(), side: c.side, profit: c.profit, reason: c.reason, time: c.time, mode: c.mode, login: account.login, at: Date.now() }); added++; }
       });
       if (added) { db.history = db.history.slice(-1000); save(); }
-      return send(res, 200, { ok: true });
+      return send(res, 200, { ok: true, estop: !!db.auto.estop });
     }
 
     if (req.method === "GET" && route === "/stats") {
