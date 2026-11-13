@@ -297,7 +297,7 @@ async function runAutoScan(symbol, b, force) {
     const frac = N === 1 ? 1 : 0.4 + 0.6 * i / (N - 1);
     const tpi = Math.round((v.entry + dirn * full * frac) * Math.pow(10, dec)) / Math.pow(10, dec);
     db.signals.push({ id: grp + (N > 1 ? "p" + (i + 1) : ""), grp, part: i + 1, parts: N, symbol, side: v.side, entry: v.entry, sl: v.sl, tp: tpi,
-      lots: fixed ? A.fixedLots : 0, risk: fixed ? 0 : A.risk / N, groupCap: N > 1 ? A.groupCap : 0, source: force ? "now" : "auto",
+      lots: fixed ? A.fixedLots : 0, risk: fixed ? 0 : A.risk / N, groupCap: N > 1 ? A.groupCap : 0, conf: v.conf, source: force ? "now" : "auto",
       status: "queued", created: Date.now(), msg: "AI auto, conf " + v.conf + ", RR " + v.rr.toFixed(2) + (N > 1 ? ", part " + (i + 1) + "/" + N : "") });
   }
   logAuto(symbol, "TRADE", (force ? "NOW  " : "") + v.side + " queued" + (N > 1 ? " x" + N + " trades" : "") + "  entry " + v.entry + "  SL " + v.sl + "  TP " + v.tp + "  RR " + v.rr.toFixed(2) + "  conf " + v.conf,
@@ -569,7 +569,7 @@ const server = http.createServer(async (req, res) => {
       s.status = "sent";
       save();
       const f = [s.id, s.symbol, s.side, s.entry, s.sl, s.tp, s.lots];
-      if (s.source === "auto" || s.source === "now") { f.push(s.risk); f.push(s.parts || 1); f.push(s.groupCap || 0); }   // 8th: risk %, 9th: trades in this signal, 10th: total risk cap %
+      if (s.source === "auto" || s.source === "now") { f.push(s.risk); f.push(s.parts || 1); f.push(s.groupCap || 0); f.push(s.conf || 0); }   // 8th: risk %, 9th: trades in this signal, 10th: total risk cap %, 11th: confidence
       return send(res, 200, f.join("|"), "text/plain");
     }
 
